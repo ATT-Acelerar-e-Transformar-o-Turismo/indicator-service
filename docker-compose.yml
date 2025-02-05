@@ -12,6 +12,7 @@ services:
       - REDIS_PORT=6379
     depends_on:
       - indicators-redis
+      - indicators-mongo
 
   indicators-redis:
     image: "redis:alpine"
@@ -20,4 +21,9 @@ services:
     ports:
       - "6379:6379"
 
-
+  indicators-mongo:
+    image: "mongo:latest"
+    container_name: indicators-mongo
+    restart: always
+    ports:
+      - "27017:27017"
