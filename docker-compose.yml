@@ -8,6 +8,7 @@ services:
     environment:
       - REDIS_HOST=indicators-redis
       - REDIS_PORT=6379
+      - MONGO_URI=mongodb://indicators-mongo:27017/indicators
     depends_on:
       - indicators-redis
       - indicators-mongo
@@ -20,4 +21,10 @@ services:
   indicators-mongo:
     image: "mongo:latest"
     container_name: indicators-mongo
-    restart: always
+    environment:
+      - MONGO_INITDB_DATABASE=indicators
+    volumes:
+      - indicators_db:/data/db
+
+volumes:
+  indicators_db:
