@@ -5,10 +5,8 @@ services:
     build: .
     container_name: indicator-service
     restart: always
-    ports:
-      - "8080:8080"
     environment:
-      - REDIS_HOST=redis
+      - REDIS_HOST=indicators-redis
       - REDIS_PORT=6379
     depends_on:
       - indicators-redis
@@ -18,12 +16,8 @@ services:
     image: "redis:alpine"
     container_name: indicators-redis
     restart: always
-    ports:
-      - "6379:6379"
 
   indicators-mongo:
     image: "mongo:latest"
     container_name: indicators-mongo
     restart: always
-    ports:
-      - "27017:27017"
