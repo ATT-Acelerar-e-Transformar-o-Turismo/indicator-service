@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   indicator-service:
     build: .
@@ -8,10 +6,19 @@ services:
     environment:
       - REDIS_HOST=indicators-redis
       - REDIS_PORT=6379
-      - MONGO_URI=mongodb://indicators-mongo:27017/indicators
+      - MONGO_URI=mongodb://indicators-mongo/indicators
     depends_on:
       - indicators-redis
       - indicators-mongo
+    develop:
+      watch:
+        - action: sync
+          path: ./app
+          target: /app
+          ignore:
+            - __pycache__/
+        - action: rebuild
+          path: requirements.txt
 
   indicators-redis:
     image: "redis:alpine"
@@ -22,7 +29,7 @@ services:
     image: "mongo:latest"
     container_name: indicators-mongo
     environment:
-      - MONGO_INITDB_DATABASE=indicators
+      MONGO_INITDB_DATABASE: indicators
     volumes:
       - indicators_db:/data/db
 
