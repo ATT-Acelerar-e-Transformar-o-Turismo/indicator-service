@@ -3,6 +3,7 @@ from bson.objectid import ObjectId
 from pydantic import BaseModel
 from pydantic_core import core_schema
 
+
 class _ObjectIdPydanticAnnotation:
 
     @classmethod
@@ -17,10 +18,12 @@ class _ObjectIdPydanticAnnotation:
         return core_schema.union_schema(
             [
                 core_schema.is_instance_schema(ObjectId),
-                core_schema.no_info_plain_validator_function(validate_from_str),
+                core_schema.no_info_plain_validator_function(
+                    validate_from_str),
             ],
             serialization=core_schema.to_string_ser_schema(),
         )
+
 
 PyObjectId = Annotated[
     ObjectId, _ObjectIdPydanticAnnotation

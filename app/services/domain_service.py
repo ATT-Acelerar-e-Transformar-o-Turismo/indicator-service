@@ -43,7 +43,7 @@ async def delete_domain(domain_id: str) -> Optional[DomainDelete]:
     )
     if domain_result.modified_count > 0:
         await db.indicators.update_many(
-            {"domain._id": ObjectId(domain_id)},
+            {"domain": ObjectId(domain_id)},
             {"$set": {"deleted": True}}
         )
         return DomainDelete(id=domain_id, deleted=True)

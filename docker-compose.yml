@@ -2,14 +2,19 @@ services:
   indicator-service:
     build: .
     container_name: indicator-service
-    restart: always
+    restart: on-failure
     environment:
       - REDIS_HOST=indicators-redis
       - REDIS_PORT=6379
       - MONGO_URI=mongodb://indicators-mongo/indicators
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq/
     depends_on:
-      - indicators-redis
-      - indicators-mongo
+      rabbitmq:
+        condition: service_healthy
+      indicators-mongo:
+        condition: service_healthy
+      indicators-redis:
+        condition: service_started
     develop:
       watch:
         - action: sync
@@ -23,7 +28,7 @@ services:
   indicators-redis:
     image: "redis:alpine"
     container_name: indicators-redis
-    restart: always
+    restart: on-failure
 
   indicators-mongo:
     image: "mongo:latest"
@@ -32,6 +37,30 @@ services:
       MONGO_INITDB_DATABASE: indicators
     volumes:
       - indicators_db:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 6s
+      timeout: 5s
+      retries: 5
+      start_period: 6s
+    restart: on-failure
+
+  rabbitmq:
+    image: "rabbitmq:3-management"
+    container_name: indicators-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 6s
+      timeout: 5s
+      retries: 5
+      start_period: 6s
+    restart: on-failure
 
 volumes:
   indicators_db:

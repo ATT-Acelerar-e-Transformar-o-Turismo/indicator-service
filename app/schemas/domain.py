@@ -2,14 +2,17 @@ from pydantic import BaseModel
 from typing import List, Optional
 from schemas.common import PyObjectId
 
+
 class DomainBase(BaseModel):
     name: str
     color: str
     image: str
     subdomains: List[str]
 
+
 class DomainCreate(DomainBase):
     pass
+
 
 class DomainUpdate(BaseModel):
     name: str
@@ -17,17 +20,20 @@ class DomainUpdate(BaseModel):
     image: str
     subdomains: List[str]
 
+
 class DomainPatch(BaseModel):
     name: Optional[str] = None
     color: Optional[str] = None
     image: Optional[str] = None
     subdomains: Optional[List[str]] = None
 
+
 class Domain(DomainBase):
     id: PyObjectId
 
     class Config:
-        orm_mode = True
+        from_attributes = True
+
 
 class DomainDelete(BaseModel):
     id: str
