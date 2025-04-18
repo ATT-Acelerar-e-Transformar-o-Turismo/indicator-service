@@ -5,13 +5,18 @@ from schemas.common import PyObjectId
 
 
 class DataPoint(BaseModel):
+    x: datetime | float
+    y: float
+
+
+class TimePoint(BaseModel):
     x: datetime
     y: float
 
 
 class DataSegmentBase(BaseModel):
     indicator_id: PyObjectId
-    points: List[DataPoint]
+    points: List[TimePoint]
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 

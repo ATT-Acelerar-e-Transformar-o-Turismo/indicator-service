@@ -2,7 +2,7 @@ import json
 import aio_pika
 import logging
 from dependencies.database import db
-from schemas.data_segment import DataSegment, DataPoint
+from schemas.data_segment import DataSegment, TimePoint
 from services.indicator_service import get_indicator_by_id
 from dependencies.rabbitmq import RabbitMQConnection
 
@@ -39,8 +39,8 @@ async def process_message(message: aio_pika.IncomingMessage):
             raise ValueError(
                 f"No indicator found for resource {resource_id}")
 
-        # Convert points to DataPoint objects
-        data_points = [DataPoint(x=p['x'], y=p['y']) for p in points]
+        # Convert points to TimePoint objects
+        data_points = [TimePoint(x=p['x'], y=p['y']) for p in points]
 
         # Create and store data segment
         segment = DataSegment(
