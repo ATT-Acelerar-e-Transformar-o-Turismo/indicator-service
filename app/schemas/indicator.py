@@ -1,7 +1,8 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 from schemas.domain import Domain
 from schemas.common import PyObjectId
+
 
 class IndicatorBase(BaseModel):
     name: str
@@ -12,12 +13,15 @@ class IndicatorBase(BaseModel):
     font: Optional[str] = None
     scale: Optional[str] = None
 
+
 class IndicatorCreate(IndicatorBase):
     pass
+
 
 class IndicatorUpdate(IndicatorBase):
     domain: PyObjectId
     subdomain: str
+
 
 class IndicatorPatch(BaseModel):
     name: Optional[str] = None
@@ -30,13 +34,26 @@ class IndicatorPatch(BaseModel):
     font: Optional[str] = None
     scale: Optional[str] = None
 
+
 class Indicator(IndicatorBase):
     id: PyObjectId
     domain: Domain
     subdomain: str
+    resources: List[str] = Field(default_factory=list)  # List of resource IDs
 
     class Config:
-        orm_mode = True
+        from_attributes = True
+
+
+class SimpleIndicator(IndicatorBase):
+    id: PyObjectId
+    domain: PyObjectId
+    subdomain: str
+    resources: List[str] = Field(default_factory=list)  # List of resource IDs
+
+    class Config:
+        from_attributes = True
+
 
 class IndicatorDelete(BaseModel):
     id: str
