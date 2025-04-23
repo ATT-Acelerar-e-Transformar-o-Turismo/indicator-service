@@ -1,9 +1,10 @@
 from fastapi import APIRouter, HTTPException, Query
-from typing import List, Optional, Dict
+from typing import List, Optional
 from datetime import datetime
 from schemas.data_segment import DataPoint
 from schemas.common import PyObjectId
 from bson.errors import InvalidId
+from services.data_propagator import get_sorted_data_points, get_data_points_by_date
 
 router = APIRouter()
 
@@ -24,8 +25,13 @@ async def get_indicator_data(
     except (InvalidId, ValueError):
         raise HTTPException(status_code=400, detail=INVALID_INDICATOR_ID)
 
-    # Logic will be implemented in service layer
-    raise HTTPException(status_code=501, detail="Not implemented")
+    points = await get_data_points_by_date(
+        indicator_id,
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit
+    )
+    return points
 
 
 @router.get("/{indicator_id}/data", response_model=List[DataPoint])
@@ -41,5 +47,10 @@ async def get_paginated_data(
     except (InvalidId, ValueError):
         raise HTTPException(status_code=400, detail=INVALID_INDICATOR_ID)
 
-    # Logic will be implemented in service layer
-    raise HTTPException(status_code=501, detail="Not implemented")
+    points = await get_sorted_data_points(
+        indicator_id,
+        skip=skip,
+        limit=limit,
+        sort=sort
+    )
+    return points

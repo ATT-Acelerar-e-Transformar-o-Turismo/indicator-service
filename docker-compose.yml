@@ -2,6 +2,8 @@ services:
   indicator-service:
     build: .
     container_name: indicator-service
+    ports:
+      - "8080:8080"
     restart: on-failure
     environment:
       - REDIS_HOST=indicators-redis
@@ -15,6 +17,8 @@ services:
         condition: service_healthy
       indicators-redis:
         condition: service_started
+    networks:
+      - indicator-network
     develop:
       watch:
         - action: sync
@@ -25,18 +29,41 @@ services:
         - action: rebuild
           path: requirements.txt
 
+  data-producer:
+    build:
+      context: .
+      dockerfile: data-producer-example/data_producer/Dockerfile
+    container_name: indicator-data-producer
+    profiles: ["development"]
+    environment:
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq/
+      - API_URL=http://indicator-service:8080
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      indicator-service:
+        condition: service_started
+    networks:
+      - indicator-network
+    restart: on-failure
+
   indicators-redis:
     image: "redis:alpine"
     container_name: indicators-redis
+    networks:
+      - indicator-network
     restart: on-failure
 
   indicators-mongo:
     image: "mongo:latest"
     container_name: indicators-mongo
+    profiles: ["development"]
     environment:
       MONGO_INITDB_DATABASE: indicators
     volumes:
       - indicators_db:/data/db
+    networks:
+      - indicator-network
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 6s
@@ -54,6 +81,8 @@ services:
     environment:
       - RABBITMQ_DEFAULT_USER=guest
       - RABBITMQ_DEFAULT_PASS=guest
+    networks:
+      - indicator-network
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
       interval: 6s
@@ -61,6 +90,10 @@ services:
       retries: 5
       start_period: 6s
     restart: on-failure
+
+networks:
+  indicator-network:
+    name: indicator-network
 
 volumes:
   indicators_db:
