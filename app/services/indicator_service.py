@@ -4,6 +4,7 @@ from dependencies.database import db
 from schemas.indicator import IndicatorCreate, IndicatorDelete
 from utils.mongo_utils import serialize, deserialize
 import logging
+from bson.errors import InvalidId
 
 logger = logging.getLogger(__name__)
 
@@ -117,8 +118,14 @@ async def remove_resource_from_indicator(indicator_id: str, resource_id: str) ->
         {"_id": ObjectId(indicator_id), "deleted": False},
         {"$pull": {"resources": resource_id}}
     )
+    logger.info(f"Indicator ID: {indicator_id}")
+    logger.info(f"Resource ID: {resource_id}")
+    logger.info(f"Result: {result}")
     if result.modified_count > 0:
-        return await get_indicator_by_id(indicator_id)
+        indicator = await db.indicators.find_one(
+            {"_id": ObjectId(indicator_id), "deleted": False}
+        )
+        return serialize(indicator)
     return None
 
 
@@ -136,3 +143,38 @@ async def get_indicator_resources(indicator_id: str) -> List[str]:
         return []
 
     return resources_data
+
+
+async def get_indicator_by_resource(resource_id: str) -> Optional[dict]:
+    """Find indicator that contains the resource"""
+    try:
+        indicator = await db.indicators.find_one(
+            {"resources": resource_id, "deleted": False}
+        )
+        if not indicator:
+            logger.warning(f"No indicator found for resource {resource_id}")
+            return None
+
+        # Get domain information like in get_indicator_by_id
+        domain_id = indicator.get("domain")
+        if not domain_id:
+            logger.error(
+                f"Invalid domain structure for indicator with resource {resource_id}")
+            return None
+
+        if isinstance(domain_id, str):
+            domain_id = ObjectId(domain_id)
+
+        domain = await db.domains.find_one({"_id": domain_id, "deleted": False})
+        if not domain:
+            logger.error(
+                f"Domain not found for indicator with resource {resource_id}")
+            return None
+
+        indicator["domain"] = domain
+        return serialize(indicator)
+
+    except Exception as e:
+        logger.error(
+            f"Error finding indicator for resource {resource_id}: {e}")
+        return None

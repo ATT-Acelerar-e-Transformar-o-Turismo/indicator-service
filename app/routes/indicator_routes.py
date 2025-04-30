@@ -15,6 +15,9 @@ from services.indicator_service import (
 )
 from schemas.indicator import IndicatorCreate, IndicatorUpdate, IndicatorPatch, Indicator, IndicatorDelete, SimpleIndicator
 from schemas.resource import ResourceCreate
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -163,7 +166,7 @@ async def get_resources_route(indicator_id: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.delete("/{indicator_id}/resources/{resource_id}", response_model=Indicator)
+@router.delete("/{indicator_id}/resources/{resource_id}", response_model=SimpleIndicator)
 async def remove_resource_route(indicator_id: str, resource_id: str):
     """Remove association of a resource from an indicator"""
     try:
