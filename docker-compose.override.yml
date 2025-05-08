@@ -1,4 +1,49 @@
 services:
   indicator-service:
+    environment:
+      - REDIS_HOST=indicators-redis
+      - REDIS_PORT=6379
+      - MONGO_URI=mongodb://indicators-mongo/indicators
+      - RABBITMQ_URL=amqp://guest:guest@indicators-rabbitmq/
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     ports:
       - "8080:8080"
+
+  rabbitmq:
+    image: "rabbitmq:3-management"
+    container_name: indicators-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15674:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    networks:
+      - indicator-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 6s
+      timeout: 5s
+      retries: 5
+      start_period: 6s
+    restart: on-failure
+
+  data-producer:
+    build:
+      context: .
+      dockerfile: data-producer-example/data_producer/Dockerfile
+    container_name: indicator-data-producer
+    profiles: ["development"]
+    environment:
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq/
+      - API_URL=http://indicator-service:8080
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      indicator-service:
+        condition: service_started
+    networks:
+      - indicator-network
+    restart: on-failure
