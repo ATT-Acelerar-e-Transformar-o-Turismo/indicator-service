@@ -3,7 +3,7 @@ services:
     build: .
     container_name: indicator-service
     ports:
-      - "8080:8080"
+      - "80:8080"
     restart: on-failure
     depends_on:
       indicators-mongo:
