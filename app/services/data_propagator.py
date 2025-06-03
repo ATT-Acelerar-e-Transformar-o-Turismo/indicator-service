@@ -2,7 +2,7 @@ from typing import List, Union, Dict, Tuple
 from datetime import datetime, timedelta
 import json
 from schemas.data_segment import DataPoint, TimePoint
-from dependencies.database import db
+from dependencies.database import get_database
 from dependencies.redis import redis_client
 from bson.objectid import ObjectId
 import logging
@@ -19,6 +19,7 @@ def get_cache_key(indicator_id: str) -> str:
 
 async def update_cached_data(indicator_id: str) -> List[DataPoint]:
     """Process and cache indicator data"""
+    db = get_database()
     segments = await db.data_segments.find(
         {"indicator_id": ObjectId(indicator_id)}
     ).to_list(None)

@@ -1,6 +1,6 @@
 from typing import List, Optional
 from bson.objectid import ObjectId
-from dependencies.database import db
+from dependencies.database import get_database
 from schemas.indicator import IndicatorCreate, IndicatorDelete
 from utils.mongo_utils import serialize, deserialize
 import logging
@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 async def create_indicator(domain_id: str, subdomain_name: str, indicator_data: IndicatorCreate) -> Optional[dict]:
+    db = get_database()
     indicator_dict = deserialize(indicator_data.dict())
     indicator_dict["_id"] = ObjectId()
     domain = await db.domains.find_one({"_id": ObjectId(domain_id)})
@@ -28,40 +29,47 @@ async def create_indicator(domain_id: str, subdomain_name: str, indicator_data: 
 
 
 async def get_all_indicators(skip: int = 0, limit: int = 10) -> List[dict]:
+    db = get_database()
     indicators = await db.indicators.find({"deleted": False}).skip(skip).limit(limit).to_list(limit)
     return [serialize(indicator) for indicator in indicators]
 
 
 async def get_indicator_by_id(indicator_id: str) -> Optional[dict]:
     """Get indicator by ID and populate its domain information"""
-    indicator = await db.indicators.find_one({"_id": ObjectId(indicator_id), "deleted": False})
-    if not indicator:
+    db = get_database()
+    try:
+        indicator = await db.indicators.find_one({"_id": ObjectId(indicator_id), "deleted": False})
+        if not indicator:
+            return None
+
+        domain_id = indicator.get("domain")
+        if not domain_id:
+            logger.error(
+                f"Invalid domain structure for indicator {indicator_id}")
+            return None
+
+        # Convert domain_id to ObjectId if it's a string
+        if isinstance(domain_id, str):
+            domain_id = ObjectId(domain_id)
+
+        # Get domain information
+        domain = await db.domains.find_one({"_id": domain_id, "deleted": False})
+        if not domain:
+            logger.error(f"Domain not found for indicator {indicator_id}")
+            return None
+
+        # Update indicator with domain information
+        indicator["domain"] = domain
+        return serialize(indicator)
+    except (InvalidId, ValueError):
+        logger.error(f"Invalid ObjectId: {indicator_id}")
         return None
-
-    domain_id = indicator.get("domain")
-    if not domain_id:
-        logger.error(
-            f"Invalid domain structure for indicator {indicator_id}")
-        return None
-
-    # Convert domain_id to ObjectId if it's a string
-    if isinstance(domain_id, str):
-        domain_id = ObjectId(domain_id)
-
-    # Get domain information
-    domain = await db.domains.find_one({"_id": domain_id, "deleted": False})
-    if not domain:
-        logger.error(f"Domain not found for indicator {indicator_id}")
-        return None
-
-    # Update indicator with domain information
-    indicator["domain"] = domain
-    return serialize(indicator)
 
 
 async def update_indicator(indicator_id: str, update_data: dict) -> int:
     if "domain" in update_data:
         domain_id = update_data["domain"]
+        db = get_database()
         domain = await db.domains.find_one({"_id": ObjectId(domain_id)})
         if not domain:
             raise ValueError("Domain not found")
@@ -69,6 +77,7 @@ async def update_indicator(indicator_id: str, update_data: dict) -> int:
             raise ValueError("Subdomain not found")
         update_data["domain"] = domain_id
 
+    db = get_database()
     result = await db.indicators.update_one(
         {"_id": ObjectId(indicator_id), "deleted": False},
         {"$set": deserialize(update_data)}
@@ -77,16 +86,22 @@ async def update_indicator(indicator_id: str, update_data: dict) -> int:
 
 
 async def delete_indicator(indicator_id: str) -> Optional[IndicatorDelete]:
-    result = await db.indicators.update_one(
-        {"_id": ObjectId(indicator_id)},
-        {"$set": {"deleted": True}}
-    )
-    if result.modified_count > 0:
-        return IndicatorDelete(id=indicator_id, deleted=True)
-    return None
+    db = get_database()
+    try:
+        result = await db.indicators.update_one(
+            {"_id": ObjectId(indicator_id)},
+            {"$set": {"deleted": True}}
+        )
+        if result.modified_count > 0:
+            return IndicatorDelete(id=indicator_id, deleted=True)
+        return None
+    except (InvalidId, ValueError):
+        logger.error(f"Invalid ObjectId: {indicator_id}")
+        return None
 
 
 async def get_indicators_by_domain(domain_id: str, skip: int = 0, limit: int = 10) -> List[dict]:
+    db = get_database()
     indicators = await db.indicators.find(
         {"domain": ObjectId(domain_id), "deleted": False}
     ).skip(skip).limit(limit).to_list(limit)
@@ -94,6 +109,7 @@ async def get_indicators_by_domain(domain_id: str, skip: int = 0, limit: int = 1
 
 
 async def get_indicators_by_subdomain(domain_id: str, subdomain_name: str, skip: int = 0, limit: int = 10) -> List[dict]:
+    db = get_database()
     indicators = await db.indicators.find(
         {"domain": ObjectId(domain_id),
          "subdomain": subdomain_name, "deleted": False}
@@ -103,6 +119,7 @@ async def get_indicators_by_subdomain(domain_id: str, subdomain_name: str, skip:
 
 async def add_resource_to_indicator(indicator_id: str, resource_id: str) -> Optional[dict]:
     """Add a resource to an indicator"""
+    db = get_database()
     result = await db.indicators.update_one(
         {"_id": ObjectId(indicator_id), "deleted": False},
         {"$addToSet": {"resources": resource_id}}
@@ -114,6 +131,7 @@ async def add_resource_to_indicator(indicator_id: str, resource_id: str) -> Opti
 
 async def remove_resource_from_indicator(indicator_id: str, resource_id: str) -> Optional[dict]:
     """Remove a resource from an indicator"""
+    db = get_database()
     result = await db.indicators.update_one(
         {"_id": ObjectId(indicator_id), "deleted": False},
         {"$pull": {"resources": resource_id}}
@@ -135,6 +153,7 @@ async def get_indicator_resources(indicator_id: str) -> List[str]:
     if not indicator:
         return []
 
+    db = get_database()
     resources_data = await db.resource_data.find(
         {"resource_id": {"$in": indicator.get("resources", [])}}
     ).to_list(None)
@@ -147,6 +166,7 @@ async def get_indicator_resources(indicator_id: str) -> List[str]:
 
 async def get_indicator_by_resource(resource_id: str) -> Optional[dict]:
     """Find indicator that contains the resource"""
+    db = get_database()
     try:
         indicator = await db.indicators.find_one(
             {"resources": resource_id, "deleted": False}

@@ -1,7 +1,7 @@
 import json
 import aio_pika
 import logging
-from dependencies.database import db
+from dependencies.database import get_database
 from schemas.data_segment import DataSegment, TimePoint
 from services.indicator_service import get_indicator_by_id, get_indicator_by_resource
 from dependencies.rabbitmq import RabbitMQConnection
@@ -17,6 +17,7 @@ async def store_data_segment(segment: DataSegment):
     """Store data segment in MongoDB and clear cache"""
     try:
         # Store in MongoDB
+        db = get_database()
         await db.data_segments.insert_one(segment.model_dump())
         logger.info(
             f"Stored data segment for indicator {segment.indicator_id}")
