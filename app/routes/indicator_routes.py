@@ -61,6 +61,7 @@ async def get_indicator_route(indicator_id: str):
 async def get_indicators_by_domain_route(
     domain_id: str, skip: int = Query(0, ge=0), limit: int = Query(10, ge=1, le=50)
 ):
+    logger.info(f"ROUTE: get_indicators_by_domain_route called with domain_id={domain_id}")
     try:
         PyObjectId(domain_id)
     except (InvalidId, ValueError):

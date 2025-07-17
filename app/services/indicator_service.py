@@ -18,8 +18,12 @@ async def create_indicator(domain_id: str, subdomain_name: str, indicator_data: 
     if subdomain_name not in domain.get("subdomains", []):
         raise ValueError("Subdomain not found")
     indicator_dict["subdomain"] = subdomain_name
-    indicator_dict["domain"] = domain_id
+    indicator_dict["domain"] = ObjectId(domain_id)
     indicator_dict["deleted"] = False
+    
+    # Debug: log what we're about to insert
+    logger.info(f"Inserting indicator with domain type: {type(indicator_dict['domain'])}, value: {indicator_dict['domain']}")
+    
     result = await db.indicators.insert_one(indicator_dict)
     if not result.inserted_id:
         raise ValueError("Failed to create indicator")
@@ -87,16 +91,17 @@ async def delete_indicator(indicator_id: str) -> Optional[IndicatorDelete]:
 
 
 async def get_indicators_by_domain(domain_id: str, skip: int = 0, limit: int = 10) -> List[dict]:
+    # Filter by domain as string (current storage format)
     indicators = await db.indicators.find(
-        {"domain": ObjectId(domain_id), "deleted": False}
+        {"domain": domain_id, "deleted": False}
     ).skip(skip).limit(limit).to_list(limit)
     return [serialize(indicator) for indicator in indicators]
 
 
 async def get_indicators_by_subdomain(domain_id: str, subdomain_name: str, skip: int = 0, limit: int = 10) -> List[dict]:
+    # Filter by domain as string and subdomain (current storage format)
     indicators = await db.indicators.find(
-        {"domain": ObjectId(domain_id),
-         "subdomain": subdomain_name, "deleted": False}
+        {"domain": domain_id, "subdomain": subdomain_name, "deleted": False}
     ).skip(skip).limit(limit).to_list(limit)
     return [serialize(indicator) for indicator in indicators]
 
