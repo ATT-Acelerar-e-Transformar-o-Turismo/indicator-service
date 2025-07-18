@@ -91,17 +91,17 @@ async def delete_indicator(indicator_id: str) -> Optional[IndicatorDelete]:
 
 
 async def get_indicators_by_domain(domain_id: str, skip: int = 0, limit: int = 10) -> List[dict]:
-    # Filter by domain as string (current storage format)
+    # Filter by domain as ObjectId (correct storage format)
     indicators = await db.indicators.find(
-        {"domain": domain_id, "deleted": False}
+        {"domain": ObjectId(domain_id), "deleted": False}
     ).skip(skip).limit(limit).to_list(limit)
     return [serialize(indicator) for indicator in indicators]
 
 
 async def get_indicators_by_subdomain(domain_id: str, subdomain_name: str, skip: int = 0, limit: int = 10) -> List[dict]:
-    # Filter by domain as string and subdomain (current storage format)
+    # Filter by domain as ObjectId and subdomain (correct storage format)
     indicators = await db.indicators.find(
-        {"domain": domain_id, "subdomain": subdomain_name, "deleted": False}
+        {"domain": ObjectId(domain_id), "subdomain": subdomain_name, "deleted": False}
     ).skip(skip).limit(limit).to_list(limit)
     return [serialize(indicator) for indicator in indicators]
 
