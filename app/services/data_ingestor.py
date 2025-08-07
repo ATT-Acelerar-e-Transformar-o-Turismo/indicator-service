@@ -3,11 +3,12 @@ import aio_pika
 import logging
 from dependencies.database import db
 from schemas.data_segment import DataSegment, TimePoint
-from services.indicator_service import get_indicator_by_id, get_indicator_by_resource
-from dependencies.rabbitmq import RabbitMQConnection
+from services.indicator_service import get_indicator_by_resource
+from dependencies.rabbitmq import consumer
 from services.data_propagator import get_cache_key
 from dependencies.redis import redis_client
 from bson.errors import InvalidId
+from config import settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -29,8 +30,8 @@ async def store_data_segment(segment: DataSegment):
         logger.error(f"Failed to store data segment: {e}")
         raise
 
-
-async def process_message(message: aio_pika.IncomingMessage):
+@consumer(settings.RESOURCE_DATA_QUEUE)
+async def process_message(message: aio_pika.abc.AbstractIncomingMessage):
     """Process incoming messages from RabbitMQ"""
     try:
         # Parse message
@@ -81,23 +82,3 @@ async def process_message(message: aio_pika.IncomingMessage):
         logger.error(f"Error processing message: {e}")
         # Only requeue for unexpected errors
         await message.reject(requeue=True)
-
-
-async def start_consuming(connection: RabbitMQConnection):
-    """Start consuming messages from RabbitMQ"""
-    try:
-        channel = await connection.connection.channel()
-        queue = await channel.declare_queue(
-            "resource_data",
-            durable=True
-        )
-
-        logger.info(f"Started consuming from queue: {queue.name}")
-
-        async with queue.iterator() as queue_iter:
-            async for message in queue_iter:
-                await process_message(message)
-
-    except Exception as e:
-        logger.error(f"Error in consumer: {e}")
-        raise

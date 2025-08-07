@@ -2,8 +2,8 @@ services:
   indicator-service:
     build: .
     container_name: indicator-service
-    ports:
-      - "8080:8080"
+    environment:
+      - ORIGINS=${ORIGINS:-localhost}
     restart: on-failure
     depends_on:
       indicators-mongo:

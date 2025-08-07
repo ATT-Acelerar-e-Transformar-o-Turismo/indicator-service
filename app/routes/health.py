@@ -3,6 +3,6 @@ from fastapi import APIRouter
 router = APIRouter()
 
 
-@router.get("")
+@router.get("/")
 def read_root():
     return {"message": "Hello from indicator service!"}
