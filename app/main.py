@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 # CORS Configuration
-origins = settings.ORIGINS
+origins = settings.ORIGINS.split(",")
 logger.warning(f"Origins: {origins}")
 app.add_middleware(
     CORSMiddleware,
