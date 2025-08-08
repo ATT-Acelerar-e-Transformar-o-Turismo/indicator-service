@@ -1,7 +1,7 @@
 from motor.motor_asyncio import AsyncIOMotorClient
 import logging
 import time
-from config.settings import settings
+from config import settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
