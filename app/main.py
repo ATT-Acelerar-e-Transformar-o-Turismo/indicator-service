@@ -7,7 +7,7 @@ import os
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 from config import settings
-import services.data_ingestor
+import services.data_ingestor  # noqa
 
 load_dotenv()
 
@@ -47,5 +47,6 @@ async def lifespan(app: FastAPI):
         if rabbitmq_client:
             await rabbitmq_client.close()
             logger.info("Closed RabbitMQ connection")
+
 
 app.router.lifespan_context = lifespan
