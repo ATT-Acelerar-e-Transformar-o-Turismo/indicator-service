@@ -4,7 +4,6 @@ from dependencies.database import db
 from schemas.indicator import IndicatorCreate, IndicatorDelete
 from utils.mongo_utils import serialize, deserialize
 import logging
-from bson.errors import InvalidId
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +17,7 @@ async def create_indicator(domain_id: str, subdomain_name: str, indicator_data: 
     if subdomain_name not in domain.get("subdomains", []):
         raise ValueError("Subdomain not found")
     indicator_dict["subdomain"] = subdomain_name
-    indicator_dict["domain"] = domain_id
+    indicator_dict["domain"] = ObjectId(domain_id)  # Store as ObjectId instead of string
     indicator_dict["deleted"] = False
     result = await db.indicators.insert_one(indicator_dict)
     if not result.inserted_id:
