@@ -1,9 +1,6 @@
 services:
   indicator-service:
     environment:
-      - REDIS_HOST=indicators-redis
-      - REDIS_PORT=6379
-      - MONGO_URI=mongodb://indicators-mongo/indicators
       - RABBITMQ_URL=amqp://guest:guest@indicators-rabbitmq/
     depends_on:
       rabbitmq:
@@ -13,7 +10,7 @@ services:
 
   rabbitmq:
     image: "rabbitmq:3-management"
-    container_name: indicators-rabbitmq
+    container_name: indicator-rabbitmq
     ports:
       - "5672:5672"
       - "15674:15672"
