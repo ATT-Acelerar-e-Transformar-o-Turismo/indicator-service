@@ -6,6 +6,8 @@ from schemas.data_segment import DataPoint
 from schemas.common import PyObjectId
 from bson.errors import InvalidId
 from services.data_propagator import get_data_points
+from services.statistics_service import get_indicator_statistics
+from schemas.statistics import IndicatorStatistics
 from config import settings
 
 router = APIRouter()
@@ -55,3 +57,17 @@ async def get_indicator_data(
     )
     response.headers["X-Total-Count"] = str(len(points))
     return points
+
+
+@router.get("/{indicator_id}/statistics", response_model=IndicatorStatistics)
+async def get_indicator_stats(
+    indicator_id: str
+):
+    """Get comprehensive statistics for an indicator"""
+    try:
+        PyObjectId(indicator_id)
+    except (InvalidId, ValueError):
+        raise HTTPException(status_code=400, detail=INVALID_INDICATOR_ID)
+
+    stats = await get_indicator_statistics(indicator_id)
+    return stats
