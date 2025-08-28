@@ -1,5 +1,6 @@
 import asyncio
 import aio_pika
+from aio_pika.exceptions import AMQPConnectionError, AMQPChannelError
 import logging
 from typing import Callable, Awaitable, Dict, List, Optional
 from config import settings
@@ -56,7 +57,7 @@ class RabbitMQClient:
                         logger.error(f"Error processing message in queue '{queue_name}': {e}")
                         # Reject the message to prevent infinite retries
                         await message.reject(requeue=False)
-        except Exception as e:
+        except (AMQPConnectionError, AMQPChannelError) as e:
             logger.error(f"Consumer for queue '{queue_name}' failed: {e}")
             raise
         finally:
@@ -69,7 +70,7 @@ class RabbitMQClient:
                 task = asyncio.create_task(self._consume(queue_name, handler))
                 self.consumer_tasks.append(task)
                 logger.info(f"Created consumer task for queue '{queue_name}'")
-            except Exception as e:
+            except (AMQPConnectionError, AMQPChannelError) as e:
                 logger.error(f"Failed to create consumer task for queue '{queue_name}': {e}")
                 raise
 
