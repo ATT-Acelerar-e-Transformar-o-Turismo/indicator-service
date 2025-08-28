@@ -3,13 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from routes import router as api_router
 from dependencies.rabbitmq import rabbitmq_client
 import logging
-import os
-from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 from config import settings
 import services.data_ingestor  # noqa
-
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +13,7 @@ app = FastAPI()
 
 # CORS Configuration
 origins = settings.ORIGINS.split(",")
-logger.warning(f"Origins: {origins}")
+logger.info(f"Origins: {origins}")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -27,9 +23,6 @@ app.add_middleware(
 )
 
 app.include_router(api_router)
-
-RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq/")
-QUEUE_NAME = "resource_data"
 
 
 @asynccontextmanager

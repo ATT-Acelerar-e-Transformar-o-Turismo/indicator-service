@@ -15,6 +15,7 @@ from services.indicator_service import (
 )
 from schemas.indicator import IndicatorCreate, IndicatorUpdate, IndicatorPatch, Indicator, IndicatorDelete, SimpleIndicator
 from schemas.resource import ResourceCreate
+from config import settings
 import logging
 
 logger = logging.getLogger(__name__)
