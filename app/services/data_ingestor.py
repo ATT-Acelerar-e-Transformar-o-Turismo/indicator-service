@@ -7,7 +7,8 @@ from dependencies.database import db
 from schemas.data_segment import DataSegment, TimePoint, MergedIndicator, DataPoint
 from services.indicator_service import get_indicator_by_resource
 from dependencies.rabbitmq import consumer
-from services.data_propagator import get_cache_key
+from services.data_propagator import get_cache_key, get_counter_key
+from services.statistics_service import STATS_CACHE_PREFIX
 from dependencies.redis import redis_client
 from bson.errors import InvalidId
 from config import settings
@@ -18,14 +19,14 @@ logger = logging.getLogger(__name__)
 async def delete_keys_by_prefix(redis_client, prefix):
     keys = []
     cursor = 0
-    
+
     # Use SCAN to find keys with the prefix
     while True:
         cursor, partial_keys = await redis_client.scan(cursor, match=f"{prefix}*")
         keys.extend(partial_keys)
         if cursor == 0:
             break
-    
+
     # Delete the keys if any were found
     if keys:
         return await redis_client.delete(*keys)
@@ -97,9 +98,20 @@ async def store_data_segment(segment: DataSegment):
         logger.info(
                 f"Updated merged data for indicator {segment.indicator_id}")
 
-        # Clear cache for this indicator
-        cache_key = get_cache_key(str(segment.indicator_id), "")
-        await delete_keys_by_prefix(redis_client, cache_key)
+        # Clear all cache for this indicator
+        indicator_id_str = str(segment.indicator_id)
+
+        # Clear data cache
+        data_cache_prefix = get_cache_key(indicator_id_str, "")
+        await delete_keys_by_prefix(redis_client, data_cache_prefix)
+
+        # Clear miss counters
+        counter_prefix = get_counter_key(indicator_id_str, "")
+        await delete_keys_by_prefix(redis_client, counter_prefix)
+
+        # Clear statistics cache
+        stats_cache_prefix = f"{STATS_CACHE_PREFIX}{indicator_id_str}"
+        await delete_keys_by_prefix(redis_client, stats_cache_prefix)
 
     except (ConnectionFailure, ServerSelectionTimeoutError) as e:
         logger.error(f"Failed to store data segment (MongoDB error): {e}")

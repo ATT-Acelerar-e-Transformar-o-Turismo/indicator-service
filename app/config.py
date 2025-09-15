@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     CACHE_TTL_SECONDS: int = Field(default=3600, env="CACHE_TTL_SECONDS")  # 1 hour
     MISS_COUNTER_TTL: int = Field(default=90, env="MISS_COUNTER_TTL")  # seconds
     MISS_THRESHOLD: int = Field(default=5, env="MISS_THRESHOLD")  # misses before full cache
+    STATS_CACHE_TTL: int = Field(default=15, env="STATS_CACHE_TTL")  # 15 seconds for statistics
 
     class Config:
         env_file = ".env"
