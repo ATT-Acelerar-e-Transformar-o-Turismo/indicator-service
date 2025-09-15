@@ -4,6 +4,9 @@ services:
     container_name: indicator-service
     environment:
       - ORIGINS=${ORIGINS:-localhost}
+      - REDIS_HOST=indicators-redis
+      - REDIS_PORT=6379
+      - MONGO_URI=mongodb://indicators-mongo/indicators
     restart: on-failure
     depends_on:
       indicators-mongo:
@@ -12,6 +15,12 @@ services:
         condition: service_started
     networks:
       - indicator-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     develop:
       watch:
         - action: sync

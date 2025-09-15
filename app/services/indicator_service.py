@@ -1,5 +1,6 @@
 from typing import List, Optional
 from bson.objectid import ObjectId
+from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 from dependencies.database import db
 from schemas.indicator import IndicatorCreate, IndicatorDelete
 from utils.mongo_utils import serialize, deserialize
@@ -173,7 +174,7 @@ async def get_indicator_by_resource(resource_id: str) -> Optional[dict]:
         indicator["domain"] = domain
         return serialize(indicator)
 
-    except Exception as e:
+    except (ConnectionFailure, ServerSelectionTimeoutError) as e:
         logger.error(
             f"Error finding indicator for resource {resource_id}: {e}")
         return None
