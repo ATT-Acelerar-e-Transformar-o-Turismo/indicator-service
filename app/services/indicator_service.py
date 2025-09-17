@@ -27,9 +27,36 @@ async def create_indicator(domain_id: str, subdomain_name: str, indicator_data: 
     return indicator
 
 
-async def get_all_indicators(skip: int = 0, limit: int = 10) -> List[dict]:
-    indicators = await db.indicators.find({"deleted": False}).skip(skip).limit(limit).to_list(limit)
+async def get_all_indicators(skip: int = 0, limit: int = 10, sort_by: str = "name", sort_order: str = "asc", governance_filter: bool = None) -> List[dict]:
+    # Define sort order
+    sort_direction = 1 if sort_order.lower() == "asc" else -1
+    
+    # Map frontend field names to database field names
+    field_mapping = {
+        "name": "name",
+        "periodicity": "periodicity", 
+        "favourites": "favourites"
+    }
+    
+    # Get the actual database field name
+    db_field = field_mapping.get(sort_by, "name")
+    
+    # Create sort criteria
+    sort_criteria = [(db_field, sort_direction)]
+    
+    # Build filter criteria
+    filter_criteria = {"deleted": False}
+    if governance_filter is not None:
+        filter_criteria["governance_indicator"] = governance_filter
+    
+    indicators = await db.indicators.find(filter_criteria).sort(sort_criteria).skip(skip).limit(limit).to_list(limit)
     return [serialize(indicator) for indicator in indicators]
+
+
+async def get_indicators_count() -> int:
+    """Get total count of non-deleted indicators"""
+    count = await db.indicators.count_documents({"deleted": False})
+    return count
 
 
 async def get_indicator_by_id(indicator_id: str) -> Optional[dict]:
@@ -86,18 +113,55 @@ async def delete_indicator(indicator_id: str) -> Optional[IndicatorDelete]:
     return None
 
 
-async def get_indicators_by_domain(domain_id: str, skip: int = 0, limit: int = 10) -> List[dict]:
-    indicators = await db.indicators.find(
-        {"domain": ObjectId(domain_id), "deleted": False}
-    ).skip(skip).limit(limit).to_list(limit)
+async def get_indicators_by_domain(domain_id: str, skip: int = 0, limit: int = 10, sort_by: str = "name", sort_order: str = "asc", governance_filter: bool = None) -> List[dict]:
+    # Define sort order
+    sort_direction = 1 if sort_order.lower() == "asc" else -1
+    
+    # Map frontend field names to database field names
+    field_mapping = {
+        "name": "name",
+        "periodicity": "periodicity", 
+        "favourites": "favourites"
+    }
+    
+    # Get the actual database field name
+    db_field = field_mapping.get(sort_by, "name")
+    
+    # Create sort criteria
+    sort_criteria = [(db_field, sort_direction)]
+    
+    # Build filter criteria
+    filter_criteria = {"domain": ObjectId(domain_id), "deleted": False}
+    if governance_filter is not None:
+        filter_criteria["governance_indicator"] = governance_filter
+    
+    indicators = await db.indicators.find(filter_criteria).sort(sort_criteria).skip(skip).limit(limit).to_list(limit)
     return [serialize(indicator) for indicator in indicators]
 
 
-async def get_indicators_by_subdomain(domain_id: str, subdomain_name: str, skip: int = 0, limit: int = 10) -> List[dict]:
-    indicators = await db.indicators.find(
-        {"domain": ObjectId(domain_id),
-         "subdomain": subdomain_name, "deleted": False}
-    ).skip(skip).limit(limit).to_list(limit)
+async def get_indicators_by_subdomain(domain_id: str, subdomain_name: str, skip: int = 0, limit: int = 10, sort_by: str = "name", sort_order: str = "asc", governance_filter: bool = None) -> List[dict]:
+    # Define sort order
+    sort_direction = 1 if sort_order.lower() == "asc" else -1
+    
+    # Map frontend field names to database field names
+    field_mapping = {
+        "name": "name",
+        "periodicity": "periodicity", 
+        "favourites": "favourites"
+    }
+    
+    # Get the actual database field name
+    db_field = field_mapping.get(sort_by, "name")
+    
+    # Create sort criteria
+    sort_criteria = [(db_field, sort_direction)]
+    
+    # Build filter criteria
+    filter_criteria = {"domain": ObjectId(domain_id), "subdomain": subdomain_name, "deleted": False}
+    if governance_filter is not None:
+        filter_criteria["governance_indicator"] = governance_filter
+    
+    indicators = await db.indicators.find(filter_criteria).sort(sort_criteria).skip(skip).limit(limit).to_list(limit)
     return [serialize(indicator) for indicator in indicators]
 
 
