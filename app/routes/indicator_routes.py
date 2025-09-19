@@ -9,6 +9,9 @@ from services.indicator_service import (
     get_indicator_by_id,
     get_indicators_by_domain,
     get_indicators_by_subdomain,
+    get_indicators_count_by_domain,
+    get_indicators_count_by_subdomain,
+    search_indicators,
     update_indicator,
     delete_indicator,
     add_resource_to_indicator,
@@ -53,6 +56,21 @@ async def get_indicators_route(
     return indicators
 
 
+@router.get("/search", response_model=List[Indicator])
+async def search_indicators_route(
+    q: str = Query(..., description="Search query"),
+    limit: int = Query(10, ge=1, le=20),
+    skip: int = Query(0, ge=0),
+    sort_by: str = Query("name", description="Field to sort by: name, periodicity, favourites"),
+    sort_order: str = Query("asc", description="Sort order: asc or desc"),
+    governance_filter: bool = Query(None, description="Filter by governance indicator: true/false"),
+    domain_filter: str = Query(None, description="Filter by domain ID"),
+    subdomain_filter: str = Query(None, description="Filter by subdomain name")
+):
+    indicators = await search_indicators(query=q, skip=skip, limit=limit, sort_by=sort_by, sort_order=sort_order, governance_filter=governance_filter, domain_filter=domain_filter, subdomain_filter=subdomain_filter)
+    return indicators
+
+
 @router.get("/count", response_model=int)
 async def get_indicators_count_route():
     """Get total count of indicators"""
@@ -72,6 +90,23 @@ async def get_indicator_route(indicator_id: str):
     return indicator
 
 
+@router.get("/domain/{domain_id}/count", response_model=int)
+async def get_indicators_count_by_domain_route(
+    domain_id: str,
+    governance_filter: bool = Query(None, description="Filter by governance indicator: true/false")
+):
+    """Get total count of indicators for a specific domain"""
+    try:
+        PyObjectId(domain_id)
+    except (InvalidId, ValueError):
+        raise HTTPException(status_code=400, detail=INVALID_DOMAIN_ID)
+    try:
+        count = await get_indicators_count_by_domain(domain_id, governance_filter=governance_filter)
+        return count
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 @router.get("/domain/{domain_id}/", response_model=List[SimpleIndicator])
 async def get_indicators_by_domain_route(
     domain_id: str, 
@@ -88,6 +123,24 @@ async def get_indicators_by_domain_route(
     try:
         indicators = await get_indicators_by_domain(domain_id, skip=skip, limit=limit, sort_by=sort_by, sort_order=sort_order, governance_filter=governance_filter)
         return indicators
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/domain/{domain_id}/subdomain/{subdomain_name}/count", response_model=int)
+async def get_indicators_count_by_subdomain_route(
+    domain_id: str,
+    subdomain_name: str,
+    governance_filter: bool = Query(None, description="Filter by governance indicator: true/false")
+):
+    """Get total count of indicators for a specific subdomain"""
+    try:
+        PyObjectId(domain_id)
+    except (InvalidId, ValueError):
+        raise HTTPException(status_code=400, detail=INVALID_DOMAIN_ID)
+    try:
+        count = await get_indicators_count_by_subdomain(domain_id, subdomain_name, governance_filter=governance_filter)
+        return count
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
