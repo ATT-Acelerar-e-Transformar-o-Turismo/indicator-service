@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     )
     RESOURCE_DATA_QUEUE: str = Field(default="resource_data", env="RESOURCE_DATA_QUEUE")
     REDIS_URL: str = Field(default="redis://indicators-redis:6379", env="REDIS_URL")
+    RESOURCE_SERVICE_URL: str = Field(default="http://resource-service:8080", env="RESOURCE_SERVICE_URL")
     
     # Cache settings
     CACHE_KEY_PREFIX: str = Field(default="indicator_data:", env="CACHE_KEY_PREFIX")

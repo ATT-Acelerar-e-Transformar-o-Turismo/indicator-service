@@ -4,7 +4,9 @@ from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 from dependencies.database import db
 from schemas.indicator import IndicatorCreate, IndicatorDelete
 from utils.mongo_utils import serialize, deserialize
+from config import settings
 import logging
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -329,6 +331,22 @@ async def add_resource_to_indicator(indicator_id: str, resource_id: str) -> Opti
     # Return indicator whether it was modified or not (idempotent operation)
     # modified_count will be 0 if resource already exists, but that's OK
     if result.matched_count > 0:
+        # Update the resource to set its indicator_id
+        try:
+            async with httpx.AsyncClient() as client:
+                patch_url = f"{settings.RESOURCE_SERVICE_URL}/resources/{resource_id}"
+                response = await client.patch(
+                    patch_url,
+                    json={"indicator_id": indicator_id},
+                    timeout=10.0
+                )
+                if response.status_code != 200:
+                    logger.warning(f"Failed to update resource {resource_id} with indicator_id: {response.status_code}")
+                else:
+                    logger.info(f"Successfully set indicator_id {indicator_id} on resource {resource_id}")
+        except Exception as e:
+            logger.error(f"Error updating resource {resource_id} with indicator_id: {e}")
+
         return await get_indicator_by_id(indicator_id)
     return None
 

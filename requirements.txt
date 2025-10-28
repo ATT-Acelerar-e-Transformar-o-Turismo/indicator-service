@@ -7,3 +7,4 @@ uvicorn==0.35.0
 python-dotenv==1.1.1
 aio-pika==9.5.7
 redis==6.4.0
+httpx==0.28.1
