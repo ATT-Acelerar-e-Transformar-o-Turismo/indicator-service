@@ -96,22 +96,25 @@ async def store_data_segment(segment: DataSegment):
                 )
 
         logger.info(
-                f"Updated merged data for indicator {segment.indicator_id}")
+                f"Updated merged data for indicator {segment.indicator_id}, total points: {len(merged_points)}")
 
         # Clear all cache for this indicator
         indicator_id_str = str(segment.indicator_id)
 
         # Clear data cache
         data_cache_prefix = get_cache_key(indicator_id_str, "")
-        await delete_keys_by_prefix(redis_client, data_cache_prefix)
+        deleted_data_keys = await delete_keys_by_prefix(redis_client, data_cache_prefix)
+        logger.info(f"Cleared {deleted_data_keys} data cache keys for indicator {indicator_id_str}")
 
         # Clear miss counters
         counter_prefix = get_counter_key(indicator_id_str, "")
-        await delete_keys_by_prefix(redis_client, counter_prefix)
+        deleted_counter_keys = await delete_keys_by_prefix(redis_client, counter_prefix)
+        logger.info(f"Cleared {deleted_counter_keys} miss counter keys for indicator {indicator_id_str}")
 
         # Clear statistics cache
         stats_cache_prefix = f"{STATS_CACHE_PREFIX}{indicator_id_str}"
-        await delete_keys_by_prefix(redis_client, stats_cache_prefix)
+        deleted_stats_keys = await delete_keys_by_prefix(redis_client, stats_cache_prefix)
+        logger.info(f"Cleared {deleted_stats_keys} stats cache keys for indicator {indicator_id_str}")
 
     except (ConnectionFailure, ServerSelectionTimeoutError) as e:
         logger.error(f"Failed to store data segment (MongoDB error): {e}")
