@@ -173,10 +173,11 @@ async def update_indicator_route(indicator_id: str, indicator: IndicatorUpdate):
     except (InvalidId, ValueError):
         raise HTTPException(status_code=400, detail=INVALID_INDICATOR_ID)
     try:
-        updated_count = await update_indicator(indicator_id, indicator.dict(exclude_unset=True))
-        if updated_count == 0:
-            raise HTTPException(status_code=404, detail=NOT_FOUND_MESSAGE)
+        update_dict = indicator.dict(exclude_unset=True)
+        await update_indicator(indicator_id, update_dict)
         updated_indicator = await get_indicator_by_id(indicator_id)
+        if not updated_indicator:
+            raise HTTPException(status_code=404, detail=NOT_FOUND_MESSAGE)
         return updated_indicator
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -189,10 +190,10 @@ async def patch_indicator_route(indicator_id: str, indicator: IndicatorPatch):
     except (InvalidId, ValueError):
         raise HTTPException(status_code=400, detail=INVALID_INDICATOR_ID)
     try:
-        updated_count = await update_indicator(indicator_id, indicator.dict(exclude_unset=True))
-        if updated_count == 0:
-            raise HTTPException(status_code=404, detail=NOT_FOUND_MESSAGE)
+        await update_indicator(indicator_id, indicator.dict(exclude_unset=True))
         updated_indicator = await get_indicator_by_id(indicator_id)
+        if not updated_indicator:
+            raise HTTPException(status_code=404, detail=NOT_FOUND_MESSAGE)
         return updated_indicator
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
