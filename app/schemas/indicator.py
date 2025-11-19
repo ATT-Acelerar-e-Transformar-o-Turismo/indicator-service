@@ -12,6 +12,8 @@ class IndicatorBase(BaseModel):
     description: Optional[str] = None
     font: Optional[str] = None
     scale: Optional[str] = None
+    unit: Optional[str] = None
+    carrying_capacity: Optional[str] = None
 
 
 class IndicatorCreate(IndicatorBase):
@@ -33,6 +35,8 @@ class IndicatorPatch(BaseModel):
     description: Optional[str] = None
     font: Optional[str] = None
     scale: Optional[str] = None
+    unit: Optional[str] = None
+    carrying_capacity: Optional[str] = None
 
 
 class Indicator(IndicatorBase):

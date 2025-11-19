@@ -326,7 +326,9 @@ async def add_resource_to_indicator(indicator_id: str, resource_id: str) -> Opti
         {"_id": ObjectId(indicator_id), "deleted": False},
         {"$addToSet": {"resources": resource_id}}
     )
-    if result.modified_count > 0:
+    # Return indicator whether it was modified or not (idempotent operation)
+    # modified_count will be 0 if resource already exists, but that's OK
+    if result.matched_count > 0:
         return await get_indicator_by_id(indicator_id)
     return None
 
