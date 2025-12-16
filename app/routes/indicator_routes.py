@@ -1,5 +1,5 @@
 from typing import List
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response, BackgroundTasks
 from bson.errors import InvalidId
 from schemas.common import PyObjectId
 from services.indicator_service import (
@@ -19,6 +19,8 @@ from services.indicator_service import (
 )
 from schemas.indicator import IndicatorCreate, IndicatorUpdate, IndicatorPatch, Indicator, IndicatorDelete, SimpleIndicator
 from schemas.resource import ResourceCreate
+from schemas.chart_export import ChartExportRequest
+from services.chart_export_service import export_service
 from config import settings
 import logging
 
@@ -261,3 +263,23 @@ async def remove_resource_route(indicator_id: str, resource_id: str):
         return updated_indicator
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/{indicator_id}/export/image", response_class=Response)
+async def export_indicator_image(
+    indicator_id: str,
+    request: ChartExportRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Generate and return a PNG image of the indicator chart based on the provided configuration.
+    """
+    image_bytes = await export_service.generate_chart_image(request, indicator_id, background_tasks)
+    
+    return Response(
+        content=image_bytes, 
+        media_type="image/png",
+        headers={
+            "Content-Disposition": f"attachment; filename=indicator_{indicator_id}.png"
+        }
+    )
