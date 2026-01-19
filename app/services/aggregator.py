@@ -9,60 +9,57 @@ def last_aggregator(items: List[T], key_func: Callable[[T], Any], value_func: Ca
     """Take the last item in each group - optimized for chronological data"""
     if not items:
         return []
-    
+
     grouped = {}
     for item in items:
         group_key = key_func(item)
-        grouped[group_key] = item  # Simply overwrite - last one wins
-    
-    # Create new items with bucket timestamps
+        grouped[group_key] = item
+
     result = []
     for group_key, item in grouped.items():
         new_item = type(item)(x=group_key, y=value_func(item))
         result.append(new_item)
-    
+
     return result
 
 def first_aggregator(items: List[T], key_func: Callable[[T], Any], value_func: Callable[[T], float]) -> List[T]:
     """Take the first item in each group"""
     if not items:
         return []
-    
+
     grouped = {}
     for item in items:
         group_key = key_func(item)
         if group_key not in grouped:
-            grouped[group_key] = item  # Keep only the first one
-    
-    # Create new items with bucket timestamps
+            grouped[group_key] = item
+
     result = []
     for group_key, item in grouped.items():
         new_item = type(item)(x=group_key, y=value_func(item))
         result.append(new_item)
-    
+
     return result
 
 def sum_aggregator(items: List[T], key_func: Callable[[T], Any], value_func: Callable[[T], float]) -> List[T]:
     """Sum values in each group using native sum()"""
     if not items:
         return []
-    
+
     grouped = defaultdict(list)
     templates = {}
-    
+
     for item in items:
         group_key = key_func(item)
         grouped[group_key].append(value_func(item))
         if group_key not in templates:
             templates[group_key] = item
-    
+
     result = []
     for group_key, values in grouped.items():
         template = templates[group_key]
-        # Create new item with summed value
         new_item = type(template)(x=group_key, y=sum(values))
         result.append(new_item)
-    
+
     return result
 
 def avg_aggregator(items: List[T], key_func: Callable[[T], Any], value_func: Callable[[T], float]) -> List[T]:

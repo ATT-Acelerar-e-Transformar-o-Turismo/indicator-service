@@ -28,27 +28,21 @@ async def create_indicator(domain_id: str, subdomain_name: str, indicator_data: 
 
 
 async def get_all_indicators(skip: int = 0, limit: int = 10, sort_by: str = "name", sort_order: str = "asc", governance_filter: bool = None) -> List[dict]:
-    # Define sort order
     sort_direction = 1 if sort_order.lower() == "asc" else -1
-    
-    # Map frontend field names to database field names
+
     field_mapping = {
         "name": "name",
-        "periodicity": "periodicity", 
+        "periodicity": "periodicity",
         "favourites": "favourites"
     }
-    
-    # Get the actual database field name
+
     db_field = field_mapping.get(sort_by, "name")
-    
-    # Create sort criteria
     sort_criteria = [(db_field, sort_direction)]
-    
-    # Build filter criteria
+
     filter_criteria = {"deleted": False}
     if governance_filter is not None:
         filter_criteria["governance"] = governance_filter
-    
+
     indicators = await db.indicators.find(filter_criteria).sort(sort_criteria).skip(skip).limit(limit).to_list(limit)
     return [serialize(indicator) for indicator in indicators]
 
@@ -122,14 +116,12 @@ async def search_indicators(query: str, skip: int = 0, limit: int = 10, sort_by:
         if subdomain_filter is not None:
             search_criteria["$and"].append({"subdomain": subdomain_filter})
         
-        # Get more results than needed for sorting by relevance
         indicators = await db.indicators.find(search_criteria).to_list(None)
-        
-        # Calculate relevance score for each indicator
+
         scored_indicators = []
         for indicator in indicators:
             score = calculate_relevance_score(indicator, words)
-            if score > 0:  # Only include indicators with some relevance
+            if score > 0:
                 scored_indicators.append((indicator, score))
         
         # Sort by relevance score or specified field
@@ -144,33 +136,28 @@ async def search_indicators(query: str, skip: int = 0, limit: int = 10, sort_by:
         # Apply pagination after sorting
         paginated_indicators = scored_indicators[skip:skip + limit]
         
-        # Process each indicator and populate domain information
         result = []
         for indicator, score in paginated_indicators:
-            # First serialize the indicator with original domain ID
             serialized = serialize(indicator)
-            
-            # Add relevance score for frontend use
             serialized["_relevance_score"] = score
-            
-            # Then manually add domain information
+
             domain_id = indicator.get("domain")
             if domain_id:
-                # Convert domain_id to ObjectId if it's a string
                 if isinstance(domain_id, str):
                     domain_id = ObjectId(domain_id)
-                
-                # Get domain information
+
                 domain = await db.domains.find_one({"_id": domain_id, "deleted": False})
                 if domain:
-                    # Replace the domain ID with the full domain object
                     serialized["domain"] = serialize(domain)
-            
+
             result.append(serialized)
-        
+
         return result
-    except Exception as e:
-        logger.error(f"Error searching indicators: {e}")
+    except (ConnectionFailure, ServerSelectionTimeoutError) as e:
+        logger.error(f"Database connection error while searching indicators: {e}")
+        return []
+    except ValueError as e:
+        logger.error(f"Invalid search parameters: {e}")
         return []
 
 
@@ -226,17 +213,14 @@ async def get_indicator_by_id(indicator_id: str) -> Optional[dict]:
             f"Invalid domain structure for indicator {indicator_id}")
         return None
 
-    # Convert domain_id to ObjectId if it's a string
     if isinstance(domain_id, str):
         domain_id = ObjectId(domain_id)
 
-    # Get domain information
     domain = await db.domains.find_one({"_id": domain_id, "deleted": False})
     if not domain:
         logger.error(f"Domain not found for indicator {indicator_id}")
         return None
 
-    # Update indicator with domain information
     indicator["domain"] = domain
     return serialize(indicator)
 
@@ -269,65 +253,51 @@ async def delete_indicator(indicator_id: str) -> Optional[IndicatorDelete]:
 
 
 async def get_indicators_by_domain(domain_id: str, skip: int = 0, limit: int = 10, sort_by: str = "name", sort_order: str = "asc", governance_filter: bool = None) -> List[dict]:
-    # Define sort order
     sort_direction = 1 if sort_order.lower() == "asc" else -1
-    
-    # Map frontend field names to database field names
+
     field_mapping = {
         "name": "name",
-        "periodicity": "periodicity", 
+        "periodicity": "periodicity",
         "favourites": "favourites"
     }
-    
-    # Get the actual database field name
+
     db_field = field_mapping.get(sort_by, "name")
-    
-    # Create sort criteria
     sort_criteria = [(db_field, sort_direction)]
-    
-    # Build filter criteria
+
     filter_criteria = {"domain": ObjectId(domain_id), "deleted": False}
     if governance_filter is not None:
         filter_criteria["governance"] = governance_filter
-    
+
     indicators = await db.indicators.find(filter_criteria).sort(sort_criteria).skip(skip).limit(limit).to_list(limit)
     return [serialize(indicator) for indicator in indicators]
 
 
 async def get_indicators_by_subdomain(domain_id: str, subdomain_name: str, skip: int = 0, limit: int = 10, sort_by: str = "name", sort_order: str = "asc", governance_filter: bool = None) -> List[dict]:
-    # Define sort order
     sort_direction = 1 if sort_order.lower() == "asc" else -1
-    
-    # Map frontend field names to database field names
+
     field_mapping = {
         "name": "name",
-        "periodicity": "periodicity", 
+        "periodicity": "periodicity",
         "favourites": "favourites"
     }
-    
-    # Get the actual database field name
+
     db_field = field_mapping.get(sort_by, "name")
-    
-    # Create sort criteria
     sort_criteria = [(db_field, sort_direction)]
-    
-    # Build filter criteria
+
     filter_criteria = {"domain": ObjectId(domain_id), "subdomain": subdomain_name, "deleted": False}
     if governance_filter is not None:
         filter_criteria["governance"] = governance_filter
-    
+
     indicators = await db.indicators.find(filter_criteria).sort(sort_criteria).skip(skip).limit(limit).to_list(limit)
     return [serialize(indicator) for indicator in indicators]
 
 
 async def add_resource_to_indicator(indicator_id: str, resource_id: str) -> Optional[dict]:
-    """Add a resource to an indicator"""
+    """Add a resource to an indicator (idempotent - no error if already present)"""
     result = await db.indicators.update_one(
         {"_id": ObjectId(indicator_id), "deleted": False},
         {"$addToSet": {"resources": resource_id}}
     )
-    # Return indicator whether it was modified or not (idempotent operation)
-    # modified_count will be 0 if resource already exists, but that's OK
     if result.matched_count > 0:
         return await get_indicator_by_id(indicator_id)
     return None
@@ -376,7 +346,6 @@ async def get_indicator_by_resource(resource_id: str) -> Optional[dict]:
             logger.warning(f"No indicator found for resource {resource_id}")
             return None
 
-        # Get domain information like in get_indicator_by_id
         domain_id = indicator.get("domain")
         if not domain_id:
             logger.error(
