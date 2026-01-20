@@ -6,7 +6,8 @@ from schemas.common import PyObjectId
 class DomainBase(BaseModel):
     name: str
     color: str
-    image: str
+    image: Optional[str] = ""
+    icon: Optional[str] = ""
     subdomains: List[str]
 
 
@@ -17,7 +18,8 @@ class DomainCreate(DomainBase):
 class DomainUpdate(BaseModel):
     name: str
     color: str
-    image: str
+    image: Optional[str] = ""
+    icon: Optional[str] = ""
     subdomains: List[str]
 
 
@@ -25,6 +27,7 @@ class DomainPatch(BaseModel):
     name: Optional[str] = None
     color: Optional[str] = None
     image: Optional[str] = None
+    icon: Optional[str] = None
     subdomains: Optional[List[str]] = None
 
 

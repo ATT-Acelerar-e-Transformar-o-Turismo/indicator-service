@@ -1,4 +1,5 @@
 import asyncio
+import json
 import aio_pika
 from aio_pika.exceptions import AMQPConnectionError, AMQPChannelError
 import logging
@@ -53,10 +54,12 @@ class RabbitMQClient:
                 async for message in queue_iter:
                     try:
                         await handler(message)
-                    except Exception as e:
-                        logger.error(f"Error processing message in queue '{queue_name}': {e}")
-                        # Reject the message to prevent infinite retries
+                    except (json.JSONDecodeError, ValueError) as e:
+                        logger.error(f"Invalid message format in queue '{queue_name}': {e}")
                         await message.reject(requeue=False)
+                    except (AMQPConnectionError, AMQPChannelError) as e:
+                        logger.error(f"RabbitMQ connection error in queue '{queue_name}': {e}")
+                        await message.nack(requeue=True)
         except (AMQPConnectionError, AMQPChannelError) as e:
             logger.error(f"Consumer for queue '{queue_name}' failed: {e}")
             raise
