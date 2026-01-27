@@ -6,6 +6,7 @@ from .annotation_routes import router as annotation_router
 from .health import router as health_router
 
 router = APIRouter()
+
 router.include_router(
     indicator_router, prefix="/indicators", tags=["Indicators"])
 router.include_router(domain_router, prefix="/domains", tags=["Domains"])

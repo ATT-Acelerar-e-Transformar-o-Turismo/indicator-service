@@ -7,6 +7,7 @@ class DomainBase(BaseModel):
     name: str
     color: str
     image: str
+    icon: str = ""
     subdomains: List[str]
 
 
@@ -18,6 +19,7 @@ class DomainUpdate(BaseModel):
     name: str
     color: str
     image: str
+    icon: str = ""
     subdomains: List[str]
 
 
@@ -25,6 +27,7 @@ class DomainPatch(BaseModel):
     name: Optional[str] = None
     color: Optional[str] = None
     image: Optional[str] = None
+    icon: Optional[str] = None
     subdomains: Optional[List[str]] = None
 
 

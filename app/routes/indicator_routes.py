@@ -28,6 +28,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
+@router.get("/version")
+def get_version():
+    return {"service": "indicator-service", "version": "1.0.0"}
+
+
 NOT_FOUND_MESSAGE = "Indicator not found"
 INVALID_DOMAIN_ID = "Invalid domain ID"
 INVALID_INDICATOR_ID = "Invalid indicator ID"
