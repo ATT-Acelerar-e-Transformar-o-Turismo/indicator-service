@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException
-from typing import List
+from fastapi import APIRouter, HTTPException, UploadFile, File
+from typing import List, Dict, Any
 from bson.errors import InvalidId
+import httpx
 from schemas.common import PyObjectId
 from services.domain_service import (
     get_all_domains,
@@ -10,7 +11,7 @@ from services.domain_service import (
     patch_domain,
     delete_domain,
 )
-from schemas.domain import Domain, DomainCreate, DomainUpdate, DomainPatch, DomainDelete  # Import the delete schema
+from schemas.domain import Domain, DomainCreate, DomainUpdate, DomainPatch, DomainDelete
 
 DOMAIN_NOT_FOUND = "Domain not found"
 INVALID_DOMAIN_ID = "Invalid domain ID"
@@ -71,3 +72,69 @@ async def delete_domain_route(domain_id: str):
     if not deleted_domain:
         raise HTTPException(status_code=404, detail=DOMAIN_NOT_FOUND)
     return deleted_domain
+
+
+@router.post("/{domain_id}/icon")
+async def upload_domain_icon(domain_id: str, file: UploadFile = File(...)) -> Dict[str, Any]:
+    """Upload icon for a domain (proxies to knowledge-base)"""
+    try:
+        PyObjectId(domain_id)
+    except (InvalidId, ValueError):
+        raise HTTPException(status_code=400, detail=INVALID_DOMAIN_ID)
+
+    domain = await get_domain_by_id(domain_id)
+    if not domain:
+        raise HTTPException(status_code=404, detail=DOMAIN_NOT_FOUND)
+
+    async with httpx.AsyncClient() as client:
+        file_content = await file.read()
+        files = {"file": (file.filename, file_content, file.content_type)}
+        response = await client.post(
+            "http://knowledge-base:8080/uploads/domain-icons/upload",
+            files=files
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=response.status_code,
+                detail="Failed to upload icon"
+            )
+
+        icon_data = response.json()
+
+    patch_data = DomainPatch(icon=icon_data["url"])
+    updated_domain = await patch_domain(domain_id, patch_data)
+
+    return {
+        "icon": icon_data,
+        "domain": updated_domain
+    }
+
+
+@router.post("/{domain_id}/image")
+async def upload_domain_image(domain_id: str, file: UploadFile = File(...)) -> Dict[str, Any]:
+    """Upload image for a domain (proxies to knowledge-base)"""
+    try:
+        PyObjectId(domain_id)
+    except (InvalidId, ValueError):
+        raise HTTPException(status_code=400, detail=INVALID_DOMAIN_ID)
+
+    domain = await get_domain_by_id(domain_id)
+    if not domain:
+        raise HTTPException(status_code=404, detail=DOMAIN_NOT_FOUND)
+
+    async with httpx.AsyncClient() as client:
+        file_content = await file.read()
+        files = {"file": (file.filename, file_content, file.content_type)}
+        response = await client.post(
+            "http://knowledge-base:8080/uploads/domain-images/upload",
+            files=files
+        )
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail="Failed to upload image")
+        image_data = response.json()
+
+    patch_data = DomainPatch(image=image_data["url"])
+    updated_domain = await patch_domain(domain_id, patch_data)
+
+    return {"image": image_data, "domain": updated_domain}
