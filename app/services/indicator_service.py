@@ -159,7 +159,7 @@ async def search_indicators(
         scored_indicators = []
         for indicator in indicators:
             score = calculate_relevance_score(indicator, words)
-            if score > 0:  # Only include indicators with some relevance
+            if score > 0:
                 scored_indicators.append((indicator, score))
 
         # Sort by relevance score or specified field
@@ -183,7 +183,6 @@ async def search_indicators(
         # Process each indicator and populate domain information
         result = []
         for indicator, score in paginated_indicators:
-            # First serialize the indicator with original domain ID
             serialized = serialize(indicator)
 
             # Add relevance score for frontend use
@@ -192,21 +191,22 @@ async def search_indicators(
             # Then manually add domain information
             domain_id = indicator.get("domain")
             if domain_id:
-                # Convert domain_id to ObjectId if it's a string
                 if isinstance(domain_id, str):
                     domain_id = ObjectId(domain_id)
 
                 # Get domain information
                 domain = await db.domains.find_one({"_id": domain_id, "deleted": False})
                 if domain:
-                    # Replace the domain ID with the full domain object
                     serialized["domain"] = serialize(domain)
 
             result.append(serialized)
 
         return result
-    except Exception as e:
-        logger.error(f"Error searching indicators: {e}")
+    except (ConnectionFailure, ServerSelectionTimeoutError) as e:
+        logger.error(f"Database connection error while searching indicators: {e}")
+        return []
+    except ValueError as e:
+        logger.error(f"Invalid search parameters: {e}")
         return []
 
 
@@ -269,17 +269,14 @@ async def get_indicator_by_id(indicator_id: str) -> Optional[dict]:
         logger.error(f"Invalid domain structure for indicator {indicator_id}")
         return None
 
-    # Convert domain_id to ObjectId if it's a string
     if isinstance(domain_id, str):
         domain_id = ObjectId(domain_id)
 
-    # Get domain information
     domain = await db.domains.find_one({"_id": domain_id, "deleted": False})
     if not domain:
         logger.error(f"Domain not found for indicator {indicator_id}")
         return None
 
-    # Update indicator with domain information
     indicator["domain"] = domain
     return serialize(indicator)
 
@@ -398,13 +395,11 @@ async def get_indicators_by_subdomain(
 async def add_resource_to_indicator(
     indicator_id: str, resource_id: str
 ) -> Optional[dict]:
-    """Add a resource to an indicator"""
+    """Add a resource to an indicator (idempotent - no error if already present)"""
     result = await db.indicators.update_one(
         {"_id": ObjectId(indicator_id), "deleted": False},
         {"$addToSet": {"resources": resource_id}},
     )
-    # Return indicator whether it was modified or not (idempotent operation)
-    # modified_count will be 0 if resource already exists, but that's OK
     if result.matched_count > 0:
         return await get_indicator_by_id(indicator_id)
     return None
@@ -436,7 +431,6 @@ async def get_indicator_by_resource(resource_id: str) -> Optional[dict]:
             logger.warning(f"No indicator found for resource {resource_id}")
             return None
 
-        # Get domain information like in get_indicator_by_id
         domain_id = indicator.get("domain")
         if not domain_id:
             logger.error(
