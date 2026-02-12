@@ -15,9 +15,15 @@ from services.indicator_service import (
     update_indicator,
     delete_indicator,
     add_resource_to_indicator,
-    remove_resource_from_indicator,
 )
-from schemas.indicator import IndicatorCreate, IndicatorUpdate, IndicatorPatch, Indicator, IndicatorDelete, SimpleIndicator
+from schemas.indicator import (
+    IndicatorCreate,
+    IndicatorUpdate,
+    IndicatorPatch,
+    Indicator,
+    IndicatorDelete,
+    SimpleIndicator,
+)
 from schemas.resource import ResourceCreate
 from schemas.chart_export import ChartExportRequest
 from services.chart_export_service import export_service
@@ -40,7 +46,9 @@ INVALID_INDICATOR_ID = "Invalid indicator ID"
 
 
 @router.post("/{domain_id}/{subdomain_name}/", response_model=Indicator)
-async def create_indicator_route(domain_id: str, subdomain_name: str, indicator: IndicatorCreate):
+async def create_indicator_route(
+    domain_id: str, subdomain_name: str, indicator: IndicatorCreate
+):
     try:
         PyObjectId(domain_id)
     except (InvalidId, ValueError):
@@ -54,13 +62,23 @@ async def create_indicator_route(domain_id: str, subdomain_name: str, indicator:
 
 @router.get("/", response_model=List[SimpleIndicator])
 async def get_indicators_route(
-    skip: int = Query(0, ge=0), 
+    skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=50),
-    sort_by: str = Query("name", description="Field to sort by: name, periodicity, favourites"),
+    sort_by: str = Query(
+        "name", description="Field to sort by: name, periodicity, favourites"
+    ),
     sort_order: str = Query("asc", description="Sort order: asc or desc"),
-    governance_filter: bool = Query(None, description="Filter by governance indicator: true/false")
+    governance_filter: bool = Query(
+        None, description="Filter by governance indicator: true/false"
+    ),
 ):
-    indicators = await get_all_indicators(skip=skip, limit=limit, sort_by=sort_by, sort_order=sort_order, governance_filter=governance_filter)
+    indicators = await get_all_indicators(
+        skip=skip,
+        limit=limit,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        governance_filter=governance_filter,
+    )
     return indicators
 
 
@@ -69,13 +87,26 @@ async def search_indicators_route(
     q: str = Query(..., description="Search query"),
     limit: int = Query(10, ge=1, le=20),
     skip: int = Query(0, ge=0),
-    sort_by: str = Query("name", description="Field to sort by: name, periodicity, favourites"),
+    sort_by: str = Query(
+        "name", description="Field to sort by: name, periodicity, favourites"
+    ),
     sort_order: str = Query("asc", description="Sort order: asc or desc"),
-    governance_filter: bool = Query(None, description="Filter by governance indicator: true/false"),
+    governance_filter: bool = Query(
+        None, description="Filter by governance indicator: true/false"
+    ),
     domain_filter: str = Query(None, description="Filter by domain ID"),
-    subdomain_filter: str = Query(None, description="Filter by subdomain name")
+    subdomain_filter: str = Query(None, description="Filter by subdomain name"),
 ):
-    indicators = await search_indicators(query=q, skip=skip, limit=limit, sort_by=sort_by, sort_order=sort_order, governance_filter=governance_filter, domain_filter=domain_filter, subdomain_filter=subdomain_filter)
+    indicators = await search_indicators(
+        query=q,
+        skip=skip,
+        limit=limit,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        governance_filter=governance_filter,
+        domain_filter=domain_filter,
+        subdomain_filter=subdomain_filter,
+    )
     return indicators
 
 
@@ -101,7 +132,9 @@ async def get_indicator_route(indicator_id: str):
 @router.get("/domain/{domain_id}/count", response_model=int)
 async def get_indicators_count_by_domain_route(
     domain_id: str,
-    governance_filter: bool = Query(None, description="Filter by governance indicator: true/false")
+    governance_filter: bool = Query(
+        None, description="Filter by governance indicator: true/false"
+    ),
 ):
     """Get total count of indicators for a specific domain"""
     try:
@@ -109,7 +142,9 @@ async def get_indicators_count_by_domain_route(
     except (InvalidId, ValueError):
         raise HTTPException(status_code=400, detail=INVALID_DOMAIN_ID)
     try:
-        count = await get_indicators_count_by_domain(domain_id, governance_filter=governance_filter)
+        count = await get_indicators_count_by_domain(
+            domain_id, governance_filter=governance_filter
+        )
         return count
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -117,19 +152,30 @@ async def get_indicators_count_by_domain_route(
 
 @router.get("/domain/{domain_id}/", response_model=List[SimpleIndicator])
 async def get_indicators_by_domain_route(
-    domain_id: str, 
-    skip: int = Query(0, ge=0), 
+    domain_id: str,
+    skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=50),
-    sort_by: str = Query("name", description="Field to sort by: name, periodicity, favourites"),
+    sort_by: str = Query(
+        "name", description="Field to sort by: name, periodicity, favourites"
+    ),
     sort_order: str = Query("asc", description="Sort order: asc or desc"),
-    governance_filter: bool = Query(None, description="Filter by governance indicator: true/false")
+    governance_filter: bool = Query(
+        None, description="Filter by governance indicator: true/false"
+    ),
 ):
     try:
         PyObjectId(domain_id)
     except (InvalidId, ValueError):
         raise HTTPException(status_code=400, detail=INVALID_DOMAIN_ID)
     try:
-        indicators = await get_indicators_by_domain(domain_id, skip=skip, limit=limit, sort_by=sort_by, sort_order=sort_order, governance_filter=governance_filter)
+        indicators = await get_indicators_by_domain(
+            domain_id,
+            skip=skip,
+            limit=limit,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            governance_filter=governance_filter,
+        )
         return indicators
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -139,7 +185,9 @@ async def get_indicators_by_domain_route(
 async def get_indicators_count_by_subdomain_route(
     domain_id: str,
     subdomain_name: str,
-    governance_filter: bool = Query(None, description="Filter by governance indicator: true/false")
+    governance_filter: bool = Query(
+        None, description="Filter by governance indicator: true/false"
+    ),
 ):
     """Get total count of indicators for a specific subdomain"""
     try:
@@ -147,28 +195,45 @@ async def get_indicators_count_by_subdomain_route(
     except (InvalidId, ValueError):
         raise HTTPException(status_code=400, detail=INVALID_DOMAIN_ID)
     try:
-        count = await get_indicators_count_by_subdomain(domain_id, subdomain_name, governance_filter=governance_filter)
+        count = await get_indicators_count_by_subdomain(
+            domain_id, subdomain_name, governance_filter=governance_filter
+        )
         return count
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@router.get("/domain/{domain_id}/subdomain/{subdomain_name}/", response_model=List[SimpleIndicator])
+@router.get(
+    "/domain/{domain_id}/subdomain/{subdomain_name}/",
+    response_model=List[SimpleIndicator],
+)
 async def get_indicators_by_subdomain_route(
-    domain_id: str, 
-    subdomain_name: str, 
-    skip: int = Query(0, ge=0), 
+    domain_id: str,
+    subdomain_name: str,
+    skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=50),
-    sort_by: str = Query("name", description="Field to sort by: name, periodicity, favourites"),
+    sort_by: str = Query(
+        "name", description="Field to sort by: name, periodicity, favourites"
+    ),
     sort_order: str = Query("asc", description="Sort order: asc or desc"),
-    governance_filter: bool = Query(None, description="Filter by governance indicator: true/false")
+    governance_filter: bool = Query(
+        None, description="Filter by governance indicator: true/false"
+    ),
 ):
     try:
         PyObjectId(domain_id)
     except (InvalidId, ValueError):
         raise HTTPException(status_code=400, detail=INVALID_DOMAIN_ID)
     try:
-        indicators = await get_indicators_by_subdomain(domain_id, subdomain_name, skip=skip, limit=limit, sort_by=sort_by, sort_order=sort_order, governance_filter=governance_filter)
+        indicators = await get_indicators_by_subdomain(
+            domain_id,
+            subdomain_name,
+            skip=skip,
+            limit=limit,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            governance_filter=governance_filter,
+        )
         return indicators
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -228,7 +293,9 @@ async def add_resource_route(indicator_id: str, resource: ResourceCreate):
         raise HTTPException(status_code=400, detail=INVALID_INDICATOR_ID)
 
     try:
-        updated_indicator = await add_resource_to_indicator(indicator_id, resource.resource_id)
+        updated_indicator = await add_resource_to_indicator(
+            indicator_id, resource.resource_id
+        )
         if not updated_indicator:
             raise HTTPException(status_code=404, detail=NOT_FOUND_MESSAGE)
         return updated_indicator
@@ -254,38 +321,21 @@ async def get_resources_route(indicator_id: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.delete("/{indicator_id}/resources/{resource_id}", response_model=SimpleIndicator)
-async def remove_resource_route(indicator_id: str, resource_id: str):
-    """Remove association of a resource from an indicator"""
-    try:
-        PyObjectId(indicator_id)
-    except (InvalidId, ValueError):
-        raise HTTPException(status_code=400, detail=INVALID_INDICATOR_ID)
-
-    try:
-        updated_indicator = await remove_resource_from_indicator(indicator_id, resource_id)
-        if not updated_indicator:
-            raise HTTPException(status_code=404, detail=NOT_FOUND_MESSAGE)
-        return updated_indicator
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
 @router.post("/{indicator_id}/export/image", response_class=Response)
 async def export_indicator_image(
-    indicator_id: str,
-    request: ChartExportRequest,
-    background_tasks: BackgroundTasks
+    indicator_id: str, request: ChartExportRequest, background_tasks: BackgroundTasks
 ):
     """
     Generate and return a PNG image of the indicator chart based on the provided configuration.
     """
-    image_bytes = await export_service.generate_chart_image(request, indicator_id, background_tasks)
-    
+    image_bytes = await export_service.generate_chart_image(
+        request, indicator_id, background_tasks
+    )
+
     return Response(
-        content=image_bytes, 
+        content=image_bytes,
         media_type="image/png",
         headers={
             "Content-Disposition": f"attachment; filename=indicator_{indicator_id}.png"
-        }
+        },
     )
