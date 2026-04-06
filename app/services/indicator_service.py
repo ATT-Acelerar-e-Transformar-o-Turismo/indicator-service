@@ -24,6 +24,7 @@ async def create_indicator(
         domain_id
     )  # Store as ObjectId instead of string
     indicator_dict["deleted"] = False
+    indicator_dict["hidden"] = False
     result = await db.indicators.insert_one(indicator_dict)
     if not result.inserted_id:
         raise ValueError("Failed to create indicator")
@@ -37,6 +38,7 @@ async def get_all_indicators(
     sort_by: str = "name",
     sort_order: str = "asc",
     governance_filter: bool = None,
+    include_hidden: bool = False,
 ) -> List[dict]:
     # Define sort order
     sort_direction = 1 if sort_order.lower() == "asc" else -1
@@ -56,6 +58,8 @@ async def get_all_indicators(
 
     # Build filter criteria
     filter_criteria = {"deleted": False}
+    if not include_hidden:
+        filter_criteria["hidden"] = {"$ne": True}
     if governance_filter is not None:
         filter_criteria["governance"] = governance_filter
 
@@ -69,17 +73,22 @@ async def get_all_indicators(
     return [serialize(indicator) for indicator in indicators]
 
 
-async def get_indicators_count() -> int:
+async def get_indicators_count(include_hidden: bool = False) -> int:
     """Get total count of non-deleted indicators"""
-    count = await db.indicators.count_documents({"deleted": False})
+    filter_criteria = {"deleted": False}
+    if not include_hidden:
+        filter_criteria["hidden"] = {"$ne": True}
+    count = await db.indicators.count_documents(filter_criteria)
     return count
 
 
 async def get_indicators_count_by_domain(
-    domain_id: str, governance_filter: bool = None
+    domain_id: str, governance_filter: bool = None, include_hidden: bool = False
 ) -> int:
     """Get total count of indicators for a specific domain"""
     filter_criteria = {"domain": ObjectId(domain_id), "deleted": False}
+    if not include_hidden:
+        filter_criteria["hidden"] = {"$ne": True}
     if governance_filter is not None:
         filter_criteria["governance"] = governance_filter
 
@@ -88,7 +97,7 @@ async def get_indicators_count_by_domain(
 
 
 async def get_indicators_count_by_subdomain(
-    domain_id: str, subdomain_name: str, governance_filter: bool = None
+    domain_id: str, subdomain_name: str, governance_filter: bool = None, include_hidden: bool = False
 ) -> int:
     """Get total count of indicators for a specific subdomain"""
     filter_criteria = {
@@ -96,6 +105,8 @@ async def get_indicators_count_by_subdomain(
         "subdomain": subdomain_name,
         "deleted": False,
     }
+    if not include_hidden:
+        filter_criteria["hidden"] = {"$ne": True}
     if governance_filter is not None:
         filter_criteria["governance"] = governance_filter
 
@@ -112,6 +123,7 @@ async def search_indicators(
     governance_filter: bool = None,
     domain_filter: str = None,
     subdomain_filter: str = None,
+    include_hidden: bool = False,
 ) -> List[dict]:
     """Search indicators by name, description, or subdomain with word-based matching and relevance scoring"""
     if not query or len(query.strip()) < 2:
@@ -138,7 +150,10 @@ async def search_indicators(
             )
 
         # Find indicators that match any of the words
-        search_criteria = {"$and": [{"deleted": False}, {"$or": word_patterns}]}
+        base_filters = [{"deleted": False}]
+        if not include_hidden:
+            base_filters.append({"hidden": {"$ne": True}})
+        search_criteria = {"$and": base_filters + [{"$or": word_patterns}]}
 
         # Add governance filter if specified
         if governance_filter is not None:
@@ -316,6 +331,7 @@ async def get_indicators_by_domain(
     sort_by: str = "name",
     sort_order: str = "asc",
     governance_filter: bool = None,
+    include_hidden: bool = False,
 ) -> List[dict]:
     # Define sort order
     sort_direction = 1 if sort_order.lower() == "asc" else -1
@@ -335,6 +351,8 @@ async def get_indicators_by_domain(
 
     # Build filter criteria
     filter_criteria = {"domain": ObjectId(domain_id), "deleted": False}
+    if not include_hidden:
+        filter_criteria["hidden"] = {"$ne": True}
     if governance_filter is not None:
         filter_criteria["governance"] = governance_filter
 
@@ -356,6 +374,7 @@ async def get_indicators_by_subdomain(
     sort_by: str = "name",
     sort_order: str = "asc",
     governance_filter: bool = None,
+    include_hidden: bool = False,
 ) -> List[dict]:
     # Define sort order
     sort_direction = 1 if sort_order.lower() == "asc" else -1
@@ -379,6 +398,8 @@ async def get_indicators_by_subdomain(
         "subdomain": subdomain_name,
         "deleted": False,
     }
+    if not include_hidden:
+        filter_criteria["hidden"] = {"$ne": True}
     if governance_filter is not None:
         filter_criteria["governance"] = governance_filter
 

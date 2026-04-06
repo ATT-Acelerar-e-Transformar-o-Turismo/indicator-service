@@ -71,6 +71,7 @@ async def get_indicators_route(
     governance_filter: bool = Query(
         None, description="Filter by governance indicator: true/false"
     ),
+    include_hidden: bool = Query(False, description="Include hidden indicators"),
 ):
     indicators = await get_all_indicators(
         skip=skip,
@@ -78,6 +79,7 @@ async def get_indicators_route(
         sort_by=sort_by,
         sort_order=sort_order,
         governance_filter=governance_filter,
+        include_hidden=include_hidden,
     )
     return indicators
 
@@ -96,6 +98,7 @@ async def search_indicators_route(
     ),
     domain_filter: str = Query(None, description="Filter by domain ID"),
     subdomain_filter: str = Query(None, description="Filter by subdomain name"),
+    include_hidden: bool = Query(False, description="Include hidden indicators"),
 ):
     indicators = await search_indicators(
         query=q,
@@ -106,14 +109,17 @@ async def search_indicators_route(
         governance_filter=governance_filter,
         domain_filter=domain_filter,
         subdomain_filter=subdomain_filter,
+        include_hidden=include_hidden,
     )
     return indicators
 
 
 @router.get("/count", response_model=int)
-async def get_indicators_count_route():
+async def get_indicators_count_route(
+    include_hidden: bool = Query(False, description="Include hidden indicators"),
+):
     """Get total count of indicators"""
-    count = await get_indicators_count()
+    count = await get_indicators_count(include_hidden=include_hidden)
     return count
 
 
@@ -135,6 +141,7 @@ async def get_indicators_count_by_domain_route(
     governance_filter: bool = Query(
         None, description="Filter by governance indicator: true/false"
     ),
+    include_hidden: bool = Query(False, description="Include hidden indicators"),
 ):
     """Get total count of indicators for a specific domain"""
     try:
@@ -143,7 +150,7 @@ async def get_indicators_count_by_domain_route(
         raise HTTPException(status_code=400, detail=INVALID_DOMAIN_ID)
     try:
         count = await get_indicators_count_by_domain(
-            domain_id, governance_filter=governance_filter
+            domain_id, governance_filter=governance_filter, include_hidden=include_hidden
         )
         return count
     except ValueError as e:
@@ -162,6 +169,7 @@ async def get_indicators_by_domain_route(
     governance_filter: bool = Query(
         None, description="Filter by governance indicator: true/false"
     ),
+    include_hidden: bool = Query(False, description="Include hidden indicators"),
 ):
     try:
         PyObjectId(domain_id)
@@ -175,6 +183,7 @@ async def get_indicators_by_domain_route(
             sort_by=sort_by,
             sort_order=sort_order,
             governance_filter=governance_filter,
+            include_hidden=include_hidden,
         )
         return indicators
     except ValueError as e:
@@ -188,6 +197,7 @@ async def get_indicators_count_by_subdomain_route(
     governance_filter: bool = Query(
         None, description="Filter by governance indicator: true/false"
     ),
+    include_hidden: bool = Query(False, description="Include hidden indicators"),
 ):
     """Get total count of indicators for a specific subdomain"""
     try:
@@ -196,7 +206,7 @@ async def get_indicators_count_by_subdomain_route(
         raise HTTPException(status_code=400, detail=INVALID_DOMAIN_ID)
     try:
         count = await get_indicators_count_by_subdomain(
-            domain_id, subdomain_name, governance_filter=governance_filter
+            domain_id, subdomain_name, governance_filter=governance_filter, include_hidden=include_hidden
         )
         return count
     except ValueError as e:
@@ -219,6 +229,7 @@ async def get_indicators_by_subdomain_route(
     governance_filter: bool = Query(
         None, description="Filter by governance indicator: true/false"
     ),
+    include_hidden: bool = Query(False, description="Include hidden indicators"),
 ):
     try:
         PyObjectId(domain_id)
@@ -233,6 +244,7 @@ async def get_indicators_by_subdomain_route(
             sort_by=sort_by,
             sort_order=sort_order,
             governance_filter=governance_filter,
+            include_hidden=include_hidden,
         )
         return indicators
     except ValueError as e:
