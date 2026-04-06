@@ -9,7 +9,6 @@ class IndicatorBase(BaseModel):
     periodicity: str
     favourites: int
     governance: bool
-    hidden: bool = False
     description: Optional[str] = None
     font: Optional[str] = None
     scale: Optional[str] = None
@@ -24,6 +23,7 @@ class IndicatorCreate(IndicatorBase):
 class IndicatorUpdate(IndicatorBase):
     domain: PyObjectId
     subdomain: str
+    hidden: bool = False
 
 
 class IndicatorPatch(BaseModel):
@@ -43,6 +43,7 @@ class IndicatorPatch(BaseModel):
 
 class Indicator(IndicatorBase):
     id: PyObjectId
+    hidden: bool = False
     domain: Domain
     subdomain: str
     resources: List[str] = Field(default_factory=list)  # List of resource IDs
@@ -53,6 +54,7 @@ class Indicator(IndicatorBase):
 
 class SimpleIndicator(IndicatorBase):
     id: PyObjectId
+    hidden: bool = False
     domain: PyObjectId
     subdomain: str
     resources: List[str] = Field(default_factory=list)  # List of resource IDs
