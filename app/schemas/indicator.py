@@ -9,6 +9,7 @@ class IndicatorBase(BaseModel):
     periodicity: str
     favourites: int
     governance: bool
+    hidden: bool = False
     description: Optional[str] = None
     font: Optional[str] = None
     scale: Optional[str] = None
@@ -32,6 +33,7 @@ class IndicatorPatch(BaseModel):
     subdomain: Optional[str] = None
     favourites: Optional[int] = None
     governance: Optional[bool] = None
+    hidden: Optional[bool] = None
     description: Optional[str] = None
     font: Optional[str] = None
     scale: Optional[str] = None

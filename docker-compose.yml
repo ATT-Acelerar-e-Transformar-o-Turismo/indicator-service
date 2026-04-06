@@ -1,6 +1,8 @@
 services:
   indicator-service:
-    build: .
+    build:
+      context: .
+      network: host
     container_name: indicator-service
     environment:
       - ORIGINS=${ORIGINS:-localhost}
