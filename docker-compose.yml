@@ -9,6 +9,7 @@ services:
       - REDIS_HOST=indicators-redis
       - REDIS_PORT=6379
       - MONGO_URI=mongodb://indicators-mongo/indicators
+      - RABBITMQ_URL=amqp://user:password@services-mq:5672/
     restart: on-failure
     depends_on:
       indicators-mongo:
@@ -17,6 +18,7 @@ services:
         condition: service_started
     networks:
       - indicator-network
+      - mq-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health/"]
       interval: 10s
@@ -60,6 +62,7 @@ services:
 networks:
   indicator-network:
     name: indicator-network
+  mq-network: {}
 
 volumes:
   indicators_db:

@@ -25,7 +25,7 @@ async def update_domain(domain_id: str, domain_data: DomainUpdate) -> Optional[d
         {"_id": ObjectId(domain_id), "deleted": False},
         {"$set": domain_data.dict()}
     )
-    if result.modified_count > 0:
+    if result.matched_count > 0:
         return await get_domain_by_id(domain_id)
     return None
 
@@ -34,7 +34,7 @@ async def patch_domain(domain_id: str, domain_data: DomainPatch) -> Optional[dic
         {"_id": ObjectId(domain_id)},
         {"$set": {**domain_data.dict(exclude_unset=True), "deleted": False}}
     )
-    return await get_domain_by_id(domain_id) if result.modified_count > 0 else None
+    return await get_domain_by_id(domain_id) if result.matched_count > 0 else None
 
 async def delete_domain(domain_id: str) -> Optional[DomainDelete]:
     domain_result = await db.domains.update_one(
