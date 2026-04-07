@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List
+from auth import require_admin
 from schemas.annotation import Annotation, AnnotationCreate, AnnotationUpdate
 from schemas.common import PyObjectId
 from bson.errors import InvalidId
@@ -33,7 +34,8 @@ async def get_indicator_annotations(indicator_id: str):
 @router.post("/{indicator_id}/annotations", response_model=Annotation)
 async def create_indicator_annotation(
     indicator_id: str,
-    annotation: AnnotationCreate
+    annotation: AnnotationCreate,
+    _=Depends(require_admin),
 ):
     """Create a new annotation for an indicator"""
     try:
@@ -72,7 +74,8 @@ async def get_annotation(
 async def update_indicator_annotation(
     indicator_id: str,
     annotation_id: str,
-    annotation: AnnotationUpdate
+    annotation: AnnotationUpdate,
+    _=Depends(require_admin),
 ):
     """Update an existing annotation"""
     try:
@@ -96,7 +99,8 @@ async def update_indicator_annotation(
 @router.delete("/{indicator_id}/annotations/{annotation_id}")
 async def delete_indicator_annotation(
     indicator_id: str,
-    annotation_id: str
+    annotation_id: str,
+    _=Depends(require_admin),
 ):
     """Delete an annotation"""
     try:

@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
 from typing import List, Dict, Any
 from bson.errors import InvalidId
 import httpx
+from auth import require_admin
 from schemas.common import PyObjectId
 from services.domain_service import (
     get_all_domains,
@@ -34,14 +35,14 @@ async def get_domain(domain_id: str):
     return domain
 
 @router.post("/", response_model=Domain)
-async def create_domain_route(domain: DomainCreate):
+async def create_domain_route(domain: DomainCreate, _=Depends(require_admin)):
     created_domain = await create_domain(domain)
     if not created_domain:
         raise HTTPException(status_code=400, detail="Failed to create domain")
     return created_domain
 
 @router.put("/{domain_id}", response_model=Domain)
-async def update_domain_route(domain_id: str, domain: DomainUpdate):
+async def update_domain_route(domain_id: str, domain: DomainUpdate, _=Depends(require_admin)):
     try:
         PyObjectId(domain_id)
     except (InvalidId, ValueError):
@@ -52,7 +53,7 @@ async def update_domain_route(domain_id: str, domain: DomainUpdate):
     return updated_domain
 
 @router.patch("/{domain_id}", response_model=Domain)
-async def patch_domain_route(domain_id: str, domain: DomainPatch):
+async def patch_domain_route(domain_id: str, domain: DomainPatch, _=Depends(require_admin)):
     try:
         PyObjectId(domain_id)
     except (InvalidId, ValueError):
@@ -63,7 +64,7 @@ async def patch_domain_route(domain_id: str, domain: DomainPatch):
     return patched_domain
 
 @router.delete("/{domain_id}", response_model=DomainDelete)
-async def delete_domain_route(domain_id: str):
+async def delete_domain_route(domain_id: str, _=Depends(require_admin)):
     try:
         PyObjectId(domain_id)
     except (InvalidId, ValueError):
@@ -75,7 +76,7 @@ async def delete_domain_route(domain_id: str):
 
 
 @router.post("/{domain_id}/icon")
-async def upload_domain_icon(domain_id: str, file: UploadFile = File(...)) -> Dict[str, Any]:
+async def upload_domain_icon(domain_id: str, file: UploadFile = File(...), _=Depends(require_admin)) -> Dict[str, Any]:
     """Upload icon for a domain (proxies to knowledge-base)"""
     try:
         PyObjectId(domain_id)
@@ -112,7 +113,7 @@ async def upload_domain_icon(domain_id: str, file: UploadFile = File(...)) -> Di
 
 
 @router.post("/{domain_id}/image")
-async def upload_domain_image(domain_id: str, file: UploadFile = File(...)) -> Dict[str, Any]:
+async def upload_domain_image(domain_id: str, file: UploadFile = File(...), _=Depends(require_admin)) -> Dict[str, Any]:
     """Upload image for a domain (proxies to knowledge-base)"""
     try:
         PyObjectId(domain_id)

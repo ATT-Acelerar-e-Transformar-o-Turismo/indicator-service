@@ -1,5 +1,6 @@
 from typing import List
-from fastapi import APIRouter, HTTPException, Query, Response, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Query, Response, BackgroundTasks, Depends
+from auth import require_admin
 from bson.errors import InvalidId
 from schemas.common import PyObjectId
 from services.indicator_service import (
@@ -47,7 +48,7 @@ INVALID_INDICATOR_ID = "Invalid indicator ID"
 
 @router.post("/{domain_id}/{subdomain_name}/", response_model=Indicator)
 async def create_indicator_route(
-    domain_id: str, subdomain_name: str, indicator: IndicatorCreate
+    domain_id: str, subdomain_name: str, indicator: IndicatorCreate, _=Depends(require_admin)
 ):
     try:
         PyObjectId(domain_id)
@@ -252,7 +253,7 @@ async def get_indicators_by_subdomain_route(
 
 
 @router.put("/{indicator_id}", response_model=Indicator)
-async def update_indicator_route(indicator_id: str, indicator: IndicatorUpdate):
+async def update_indicator_route(indicator_id: str, indicator: IndicatorUpdate, _=Depends(require_admin)):
     try:
         PyObjectId(indicator_id)
     except (InvalidId, ValueError):
@@ -269,7 +270,7 @@ async def update_indicator_route(indicator_id: str, indicator: IndicatorUpdate):
 
 
 @router.patch("/{indicator_id}", response_model=Indicator)
-async def patch_indicator_route(indicator_id: str, indicator: IndicatorPatch):
+async def patch_indicator_route(indicator_id: str, indicator: IndicatorPatch, _=Depends(require_admin)):
     try:
         PyObjectId(indicator_id)
     except (InvalidId, ValueError):
@@ -285,7 +286,7 @@ async def patch_indicator_route(indicator_id: str, indicator: IndicatorPatch):
 
 
 @router.delete("/{indicator_id}", response_model=IndicatorDelete)
-async def delete_indicator_route(indicator_id: str):
+async def delete_indicator_route(indicator_id: str, _=Depends(require_admin)):
     try:
         PyObjectId(indicator_id)
     except (InvalidId, ValueError):
@@ -297,7 +298,7 @@ async def delete_indicator_route(indicator_id: str):
 
 
 @router.post("/{indicator_id}/resources", response_model=Indicator)
-async def add_resource_route(indicator_id: str, resource: ResourceCreate):
+async def add_resource_route(indicator_id: str, resource: ResourceCreate, _=Depends(require_admin)):
     """Associate a resource to an indicator"""
     try:
         PyObjectId(indicator_id)
