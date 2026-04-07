@@ -17,7 +17,9 @@ async def create_indicator(
     domain = await db.domains.find_one({"_id": ObjectId(domain_id)})
     if not domain:
         raise ValueError("Domain not found")
-    if subdomain_name not in domain.get("subdomains", []):
+    subdomains = domain.get("subdomains", [])
+    subdomain_names = [s["name"] if isinstance(s, dict) else s for s in subdomains]
+    if subdomain_name not in subdomain_names:
         raise ValueError("Subdomain not found")
     indicator_dict["subdomain"] = subdomain_name
     indicator_dict["domain"] = ObjectId(
@@ -302,10 +304,11 @@ async def update_indicator(indicator_id: str, update_data: dict) -> int:
         domain = await db.domains.find_one({"_id": ObjectId(domain_id)})
         if not domain:
             raise ValueError("Domain not found")
-        if "subdomain" in update_data and update_data["subdomain"] not in domain.get(
-            "subdomains", []
-        ):
-            raise ValueError("Subdomain not found")
+        if "subdomain" in update_data:
+            subdomains = domain.get("subdomains", [])
+            subdomain_names = [s["name"] if isinstance(s, dict) else s for s in subdomains]
+            if update_data["subdomain"] not in subdomain_names:
+                raise ValueError("Subdomain not found")
         update_data["domain"] = domain_id
 
     result = await db.indicators.update_one(
