@@ -6,10 +6,12 @@ from schemas.common import PyObjectId
 
 class IndicatorBase(BaseModel):
     name: str
+    name_en: Optional[str] = ""
     periodicity: str
     favourites: int
     governance: bool
     description: Optional[str] = None
+    description_en: Optional[str] = ""
     font: Optional[str] = None
     scale: Optional[str] = None
     unit: Optional[str] = None
@@ -28,6 +30,7 @@ class IndicatorUpdate(IndicatorBase):
 
 class IndicatorPatch(BaseModel):
     name: Optional[str] = None
+    name_en: Optional[str] = None
     periodicity: Optional[str] = None
     domain: Optional[PyObjectId] = None
     subdomain: Optional[str] = None
@@ -35,6 +38,7 @@ class IndicatorPatch(BaseModel):
     governance: Optional[bool] = None
     hidden: Optional[bool] = None
     description: Optional[str] = None
+    description_en: Optional[str] = None
     font: Optional[str] = None
     scale: Optional[str] = None
     unit: Optional[str] = None
