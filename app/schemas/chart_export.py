@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
+from datetime import datetime
 from enum import Enum
 
 
@@ -25,8 +26,8 @@ class ThemeMode(str, Enum):
 class ChartExportRequest(BaseModel):
     # Data parameters
     granularity: str = Field("0", description="Data granularity")
-    start_date: Optional[str] = Field(None, description="Start date (ISO format)")
-    end_date: Optional[str] = Field(None, description="End date (ISO format)")
+    start_date: Optional[datetime] = Field(None, description="Start date (ISO format)")
+    end_date: Optional[datetime] = Field(None, description="End date (ISO format)")
 
     # Chart configuration
     chart_type: ChartType = Field(ChartType.line, description="Type of chart")
