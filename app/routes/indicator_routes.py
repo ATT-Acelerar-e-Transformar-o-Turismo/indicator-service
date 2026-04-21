@@ -1,6 +1,6 @@
 from typing import List
 from fastapi import APIRouter, HTTPException, Query, Response, BackgroundTasks, Depends
-from auth import require_admin
+from auth import require_admin, require_auth
 from bson.errors import InvalidId
 from schemas.common import PyObjectId
 from services.indicator_service import (
@@ -336,7 +336,7 @@ async def get_resources_route(indicator_id: str):
 
 @router.post("/{indicator_id}/export/image", response_class=Response)
 async def export_indicator_image(
-    indicator_id: str, request: ChartExportRequest, background_tasks: BackgroundTasks
+    indicator_id: str, request: ChartExportRequest, background_tasks: BackgroundTasks, _=Depends(require_auth)
 ):
     """
     Generate and return a PNG image of the indicator chart based on the provided configuration.
