@@ -276,11 +276,41 @@ async def patch_indicator_route(indicator_id: str, indicator: IndicatorPatch, _=
     except (InvalidId, ValueError):
         raise HTTPException(status_code=400, detail=INVALID_INDICATOR_ID)
     try:
-        await update_indicator(indicator_id, indicator.dict(exclude_unset=True))
+        patch_data = indicator.dict(exclude_unset=True)
+
+        # The IndicatorPatch model only validates chart_types vs
+        # default_chart_type when both are present in the payload. For a PATCH
+        # that touches just one of them, re-validate the *merged* document so
+        # we never persist a default that isn't in the stored chart_types.
+        if "chart_types" in patch_data or "default_chart_type" in patch_data:
+            existing = await get_indicator_by_id(indicator_id)
+            if not existing:
+                raise HTTPException(status_code=404, detail=NOT_FOUND_MESSAGE)
+            existing_dict = existing.model_dump() if hasattr(existing, "model_dump") else dict(existing)
+            merged_chart_types = patch_data.get(
+                "chart_types", existing_dict.get("chart_types") or []
+            )
+            merged_default = patch_data.get(
+                "default_chart_type", existing_dict.get("default_chart_type")
+            )
+            if not merged_chart_types:
+                raise HTTPException(
+                    status_code=400,
+                    detail="chart_types must contain at least one chart type",
+                )
+            if merged_default is not None and merged_default not in merged_chart_types:
+                raise HTTPException(
+                    status_code=400,
+                    detail="default_chart_type must be one of the values in chart_types",
+                )
+
+        await update_indicator(indicator_id, patch_data)
         updated_indicator = await get_indicator_by_id(indicator_id)
         if not updated_indicator:
             raise HTTPException(status_code=404, detail=NOT_FOUND_MESSAGE)
         return updated_indicator
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

@@ -19,7 +19,7 @@ class ChartType(str, Enum):
     # (box plot: [min,q1,median,q3,max]; candlestick: [open,high,low,close];
     # range bar / range area: [low, high]). When the underlying data does
     # not match the required shape, the renderer falls back to an empty
-    # chart with an informational message.
+    # chart carrying the message "Chart type not supported for this data".
     boxPlot = "boxPlot"
     candlestick = "candlestick"
     rangeBar = "rangeBar"

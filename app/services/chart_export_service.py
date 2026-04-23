@@ -52,16 +52,39 @@ class ChartExportService:
             fig.add_trace(go.Scatter(x=x_values, y=y_values, mode='markers', marker=dict(color=request.colors[0] if request.colors else None)))
         elif request.chart_type in (ChartType.pie, ChartType.donut):
             hole = 0.5 if request.chart_type == ChartType.donut else 0
-            fig.add_trace(go.Pie(labels=x_values, values=y_values, hole=hole))
+            pie_kwargs = {"labels": x_values, "values": y_values, "hole": hole}
+            if request.colors:
+                pie_kwargs["marker"] = {"colors": request.colors}
+            fig.add_trace(go.Pie(**pie_kwargs))
         elif request.chart_type == ChartType.treemap:
-            fig.add_trace(go.Treemap(labels=x_values, parents=[""] * len(x_values), values=y_values))
+            treemap_kwargs = {
+                "labels": x_values,
+                "parents": [""] * len(x_values),
+                "values": y_values,
+            }
+            if request.colors:
+                treemap_kwargs["marker"] = {"colors": request.colors}
+            fig.add_trace(go.Treemap(**treemap_kwargs))
         elif request.chart_type == ChartType.heatmap:
             # Single-row heatmap with x as columns, one constant row.
-            fig.add_trace(go.Heatmap(x=x_values, y=["value"], z=[y_values]))
+            heatmap_kwargs = {"x": x_values, "y": ["value"], "z": [y_values]}
+            if request.colors:
+                # Spread the supplied palette across a continuous colorscale.
+                n = len(request.colors)
+                if n == 1:
+                    heatmap_kwargs["colorscale"] = [[0, request.colors[0]], [1, request.colors[0]]]
+                else:
+                    heatmap_kwargs["colorscale"] = [
+                        [i / (n - 1), c] for i, c in enumerate(request.colors)
+                    ]
+            fig.add_trace(go.Heatmap(**heatmap_kwargs))
         else:
             # Types requiring shape-specific data (box plot, candlestick,
-            # range bar, range area) can't be produced from flat {x,y}.
-            return self._create_empty_chart_image(request)
+            # range bar, range area) can't be produced from flat {x, y}.
+            # Surface that to the user rather than the generic "No Data".
+            return self._create_empty_chart_image(
+                request, message="Chart type not supported for this data"
+            )
 
         # 4. Apply Layout & Styling
         template = "plotly_white" if request.theme == ThemeMode.light else "plotly_dark"
@@ -127,7 +150,9 @@ class ChartExportService:
         img_bytes = fig.to_image(format="png", scale=2)
         return img_bytes
 
-    def _create_empty_chart_image(self, request: ChartExportRequest) -> bytes:
+    def _create_empty_chart_image(
+        self, request: ChartExportRequest, message: str = "No Data Available"
+    ) -> bytes:
         fig = go.Figure()
         fig.update_layout(
             width=request.width,
@@ -136,7 +161,7 @@ class ChartExportService:
             yaxis={"visible": False},
             annotations=[
                 {
-                    "text": "No Data Available",
+                    "text": message,
                     "xref": "paper",
                     "yref": "paper",
                     "showarrow": False,
