@@ -50,6 +50,18 @@ class ChartExportService:
             fig.add_trace(go.Bar(x=x_values, y=y_values, marker_color=request.colors[0] if request.colors else None))
         elif request.chart_type == ChartType.scatter:
             fig.add_trace(go.Scatter(x=x_values, y=y_values, mode='markers', marker=dict(color=request.colors[0] if request.colors else None)))
+        elif request.chart_type in (ChartType.pie, ChartType.donut):
+            hole = 0.5 if request.chart_type == ChartType.donut else 0
+            fig.add_trace(go.Pie(labels=x_values, values=y_values, hole=hole))
+        elif request.chart_type == ChartType.treemap:
+            fig.add_trace(go.Treemap(labels=x_values, parents=[""] * len(x_values), values=y_values))
+        elif request.chart_type == ChartType.heatmap:
+            # Single-row heatmap with x as columns, one constant row.
+            fig.add_trace(go.Heatmap(x=x_values, y=["value"], z=[y_values]))
+        else:
+            # Types requiring shape-specific data (box plot, candlestick,
+            # range bar, range area) can't be produced from flat {x,y}.
+            return self._create_empty_chart_image(request)
 
         # 4. Apply Layout & Styling
         template = "plotly_white" if request.theme == ThemeMode.light else "plotly_dark"

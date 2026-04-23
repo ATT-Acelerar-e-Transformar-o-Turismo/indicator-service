@@ -10,6 +10,20 @@ class ChartType(str, Enum):
     bar = "bar"
     column = "column"
     scatter = "scatter"
+    # Aggregate visualizations: derived from {x,y} time-series data
+    pie = "pie"
+    donut = "donut"
+    treemap = "treemap"
+    heatmap = "heatmap"
+    # Shape-specific types: require specially-structured series data
+    # (box plot: [min,q1,median,q3,max]; candlestick: [open,high,low,close];
+    # range bar / range area: [low, high]). When the underlying data does
+    # not match the required shape, the renderer falls back to an empty
+    # chart with an informational message.
+    boxPlot = "boxPlot"
+    candlestick = "candlestick"
+    rangeBar = "rangeBar"
+    rangeArea = "rangeArea"
 
 
 class XAxisType(str, Enum):
