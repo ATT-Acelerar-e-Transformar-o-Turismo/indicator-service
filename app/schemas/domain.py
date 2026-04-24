@@ -6,6 +6,7 @@ from schemas.common import PyObjectId
 class Subdomain(BaseModel):
     name: str
     name_en: Optional[str] = ""
+    hidden: bool = False
 
 
 class DomainBase(BaseModel):
@@ -14,6 +15,7 @@ class DomainBase(BaseModel):
     color: str
     image: Optional[str] = ""
     icon: Optional[str] = ""
+    hidden: bool = False
     subdomains: List[Union[Subdomain, str]]
 
     @field_validator("subdomains", mode="before")
@@ -40,6 +42,7 @@ class DomainUpdate(BaseModel):
     color: str
     image: Optional[str] = ""
     icon: Optional[str] = ""
+    hidden: bool = False
     subdomains: List[Union[Subdomain, str]]
 
     @field_validator("subdomains", mode="before")
@@ -62,6 +65,7 @@ class DomainPatch(BaseModel):
     color: Optional[str] = None
     image: Optional[str] = None
     icon: Optional[str] = None
+    hidden: Optional[bool] = None
     subdomains: Optional[List[Union[Subdomain, str]]] = None
 
     @field_validator("subdomains", mode="before")
