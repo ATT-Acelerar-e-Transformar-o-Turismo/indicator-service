@@ -18,13 +18,17 @@ class IndicatorBase(BaseModel):
     name: str
     name_en: Optional[str] = ""
     periodicity: str
+    periodicity_en: Optional[str] = ""
     favourites: int
     governance: bool
     description: Optional[str] = None
     description_en: Optional[str] = ""
     font: Optional[str] = None
+    font_en: Optional[str] = ""
     scale: Optional[str] = None
+    scale_en: Optional[str] = ""
     unit: Optional[str] = None
+    unit_en: Optional[str] = ""
     carrying_capacity: Optional[str] = None
     chart_types: List[ChartType] = Field(default_factory=lambda: list(DEFAULT_CHART_TYPES))
     default_chart_type: ChartType = DEFAULT_CHART_TYPE
@@ -66,6 +70,7 @@ class IndicatorPatch(BaseModel):
     name: Optional[str] = None
     name_en: Optional[str] = None
     periodicity: Optional[str] = None
+    periodicity_en: Optional[str] = None
     domain: Optional[PyObjectId] = None
     subdomain: Optional[str] = None
     favourites: Optional[int] = None
@@ -74,8 +79,11 @@ class IndicatorPatch(BaseModel):
     description: Optional[str] = None
     description_en: Optional[str] = None
     font: Optional[str] = None
+    font_en: Optional[str] = None
     scale: Optional[str] = None
+    scale_en: Optional[str] = None
     unit: Optional[str] = None
+    unit_en: Optional[str] = None
     carrying_capacity: Optional[str] = None
     chart_types: Optional[List[ChartType]] = None
     default_chart_type: Optional[ChartType] = None
