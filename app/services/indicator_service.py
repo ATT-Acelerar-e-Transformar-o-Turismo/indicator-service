@@ -1,12 +1,32 @@
 from typing import List, Optional
 from bson.objectid import ObjectId
+from pymongo.collation import Collation
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 from dependencies.database import db
 from schemas.indicator import IndicatorCreate, IndicatorDelete
+from services.domain_service import (
+    get_hidden_domain_ids,
+    get_hidden_dimension_keys,
+    is_domain_hidden,
+    is_subdomain_hidden,
+)
 from utils.mongo_utils import serialize, deserialize
 import logging
+import unicodedata
+
+
+def _pt_sort_key(s: str) -> str:
+    """Accent-insensitive, case-insensitive sort key for Portuguese strings."""
+    if not s:
+        return ""
+    nfkd = unicodedata.normalize("NFKD", s)
+    return "".join(c for c in nfkd if not unicodedata.combining(c)).casefold()
 
 logger = logging.getLogger(__name__)
+
+# Portuguese locale collation for accent-aware alphabetical sorting.
+# strength=1 treats "Á" and "a" as equal for ordering.
+PT_COLLATION = Collation(locale="pt", strength=1)
 
 
 async def create_indicator(
@@ -62,11 +82,18 @@ async def get_all_indicators(
     filter_criteria = {"deleted": False}
     if not include_hidden:
         filter_criteria["hidden"] = {"$ne": True}
+        hidden_domains = await get_hidden_domain_ids()
+        if hidden_domains:
+            filter_criteria["domain"] = {"$nin": hidden_domains}
+        hidden_dims = await get_hidden_dimension_keys()
+        if hidden_dims:
+            filter_criteria["$nor"] = hidden_dims
     if governance_filter is not None:
         filter_criteria["governance"] = governance_filter
 
     indicators = (
         await db.indicators.find(filter_criteria)
+        .collation(PT_COLLATION)
         .sort(sort_criteria)
         .skip(skip)
         .limit(limit)
@@ -80,6 +107,12 @@ async def get_indicators_count(include_hidden: bool = False) -> int:
     filter_criteria = {"deleted": False}
     if not include_hidden:
         filter_criteria["hidden"] = {"$ne": True}
+        hidden_domains = await get_hidden_domain_ids()
+        if hidden_domains:
+            filter_criteria["domain"] = {"$nin": hidden_domains}
+        hidden_dims = await get_hidden_dimension_keys()
+        if hidden_dims:
+            filter_criteria["$nor"] = hidden_dims
     count = await db.indicators.count_documents(filter_criteria)
     return count
 
@@ -88,9 +121,15 @@ async def get_indicators_count_by_domain(
     domain_id: str, governance_filter: bool = None, include_hidden: bool = False
 ) -> int:
     """Get total count of indicators for a specific domain"""
+    if not include_hidden and await is_domain_hidden(domain_id):
+        return 0
     filter_criteria = {"domain": ObjectId(domain_id), "deleted": False}
     if not include_hidden:
         filter_criteria["hidden"] = {"$ne": True}
+        hidden_dims = await get_hidden_dimension_keys()
+        hidden_subs_here = [k["subdomain"] for k in hidden_dims if k["domain"] == ObjectId(domain_id)]
+        if hidden_subs_here:
+            filter_criteria["subdomain"] = {"$nin": hidden_subs_here}
     if governance_filter is not None:
         filter_criteria["governance"] = governance_filter
 
@@ -102,6 +141,8 @@ async def get_indicators_count_by_subdomain(
     domain_id: str, subdomain_name: str, governance_filter: bool = None, include_hidden: bool = False
 ) -> int:
     """Get total count of indicators for a specific subdomain"""
+    if not include_hidden and await is_subdomain_hidden(domain_id, subdomain_name):
+        return 0
     filter_criteria = {
         "domain": ObjectId(domain_id),
         "subdomain": subdomain_name,
@@ -155,6 +196,12 @@ async def search_indicators(
         base_filters = [{"deleted": False}]
         if not include_hidden:
             base_filters.append({"hidden": {"$ne": True}})
+            hidden_domains = await get_hidden_domain_ids()
+            if hidden_domains:
+                base_filters.append({"domain": {"$nin": hidden_domains}})
+            hidden_dims = await get_hidden_dimension_keys()
+            if hidden_dims:
+                base_filters.append({"$nor": hidden_dims})
         search_criteria = {"$and": base_filters + [{"$or": word_patterns}]}
 
         # Add governance filter if specified
@@ -190,9 +237,12 @@ async def search_indicators(
         else:
             # Sort by specified field
             reverse_order = sort_order.lower() == "desc"
-            scored_indicators.sort(
-                key=lambda x: x[0].get(sort_by, ""), reverse=reverse_order
+            key_fn = (
+                (lambda x: _pt_sort_key(x[0].get(sort_by, "")))
+                if sort_by == "name"
+                else (lambda x: x[0].get(sort_by, ""))
             )
+            scored_indicators.sort(key=key_fn, reverse=reverse_order)
 
         # Apply pagination after sorting
         paginated_indicators = scored_indicators[skip : skip + limit]
@@ -353,14 +403,21 @@ async def get_indicators_by_domain(
     sort_criteria = [(db_field, sort_direction)]
 
     # Build filter criteria
+    if not include_hidden and await is_domain_hidden(domain_id):
+        return []
     filter_criteria = {"domain": ObjectId(domain_id), "deleted": False}
     if not include_hidden:
         filter_criteria["hidden"] = {"$ne": True}
+        hidden_dims = await get_hidden_dimension_keys()
+        hidden_subs_here = [k["subdomain"] for k in hidden_dims if k["domain"] == ObjectId(domain_id)]
+        if hidden_subs_here:
+            filter_criteria["subdomain"] = {"$nin": hidden_subs_here}
     if governance_filter is not None:
         filter_criteria["governance"] = governance_filter
 
     indicators = (
         await db.indicators.find(filter_criteria)
+        .collation(PT_COLLATION)
         .sort(sort_criteria)
         .skip(skip)
         .limit(limit)
@@ -379,6 +436,9 @@ async def get_indicators_by_subdomain(
     governance_filter: bool = None,
     include_hidden: bool = False,
 ) -> List[dict]:
+    if not include_hidden and await is_subdomain_hidden(domain_id, subdomain_name):
+        return []
+
     # Define sort order
     sort_direction = 1 if sort_order.lower() == "asc" else -1
 
@@ -408,6 +468,7 @@ async def get_indicators_by_subdomain(
 
     indicators = (
         await db.indicators.find(filter_criteria)
+        .collation(PT_COLLATION)
         .sort(sort_criteria)
         .skip(skip)
         .limit(limit)

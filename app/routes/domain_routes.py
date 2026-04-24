@@ -20,8 +20,8 @@ INVALID_DOMAIN_ID = "Invalid domain ID"
 router = APIRouter()
 
 @router.get("/", response_model=List[Domain])
-async def get_domains():
-    return await get_all_domains()
+async def get_domains(include_hidden: bool = False):
+    return await get_all_domains(include_hidden=include_hidden)
 
 @router.get("/{domain_id}", response_model=Domain)
 async def get_domain(domain_id: str):
