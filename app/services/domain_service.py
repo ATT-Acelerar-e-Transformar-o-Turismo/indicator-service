@@ -29,14 +29,28 @@ async def get_hidden_dimension_keys() -> List[dict]:
     return keys
 
 
-async def is_subdomain_hidden(domain_id: str, subdomain_name: str) -> bool:
-    """Check if a specific subdomain is marked hidden."""
+async def is_domain_hidden(domain_id: str) -> bool:
+    """Check if a domain is marked hidden (or has been deleted)."""
     domain = await db.domains.find_one(
         {"_id": ObjectId(domain_id), "deleted": False},
-        {"subdomains": 1},
+        {"hidden": 1},
     )
     if not domain:
-        return False
+        return True
+    return bool(domain.get("hidden"))
+
+
+async def is_subdomain_hidden(domain_id: str, subdomain_name: str) -> bool:
+    """Check if a specific subdomain is hidden — also treats the subdomain as
+    hidden when its parent domain is itself hidden."""
+    domain = await db.domains.find_one(
+        {"_id": ObjectId(domain_id), "deleted": False},
+        {"hidden": 1, "subdomains": 1},
+    )
+    if not domain:
+        return True
+    if domain.get("hidden"):
+        return True
     for sub in domain.get("subdomains") or []:
         if isinstance(sub, dict) and sub.get("name") == subdomain_name:
             return bool(sub.get("hidden"))
@@ -57,9 +71,15 @@ async def create_domain(domain_data: DomainCreate) -> Optional[dict]:
     return None
 
 async def update_domain(domain_id: str, domain_data: DomainUpdate) -> Optional[dict]:
+    # `exclude_unset=True` so a PUT that omits `hidden` doesn't silently
+    # unhide an already-hidden domain — the $set only touches fields that
+    # the client actually sent.
+    update_payload = domain_data.dict(exclude_unset=True)
+    if not update_payload:
+        return await get_domain_by_id(domain_id)
     result = await db.domains.update_one(
         {"_id": ObjectId(domain_id), "deleted": False},
-        {"$set": domain_data.dict()}
+        {"$set": update_payload}
     )
     if result.matched_count > 0:
         return await get_domain_by_id(domain_id)

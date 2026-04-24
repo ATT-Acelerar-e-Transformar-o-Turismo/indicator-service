@@ -42,7 +42,10 @@ class DomainUpdate(BaseModel):
     color: str
     image: Optional[str] = ""
     icon: Optional[str] = ""
-    hidden: bool = False
+    # Optional so clients that omit `hidden` in a PUT don't silently unhide an
+    # already-hidden domain. Use `exclude_unset=True` in the service when
+    # building the $set document.
+    hidden: Optional[bool] = None
     subdomains: List[Union[Subdomain, str]]
 
     @field_validator("subdomains", mode="before")

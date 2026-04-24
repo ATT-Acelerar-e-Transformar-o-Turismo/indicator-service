@@ -7,6 +7,7 @@ from schemas.indicator import IndicatorCreate, IndicatorDelete
 from services.domain_service import (
     get_hidden_domain_ids,
     get_hidden_dimension_keys,
+    is_domain_hidden,
     is_subdomain_hidden,
 )
 from utils.mongo_utils import serialize, deserialize
@@ -120,6 +121,8 @@ async def get_indicators_count_by_domain(
     domain_id: str, governance_filter: bool = None, include_hidden: bool = False
 ) -> int:
     """Get total count of indicators for a specific domain"""
+    if not include_hidden and await is_domain_hidden(domain_id):
+        return 0
     filter_criteria = {"domain": ObjectId(domain_id), "deleted": False}
     if not include_hidden:
         filter_criteria["hidden"] = {"$ne": True}
@@ -400,6 +403,8 @@ async def get_indicators_by_domain(
     sort_criteria = [(db_field, sort_direction)]
 
     # Build filter criteria
+    if not include_hidden and await is_domain_hidden(domain_id):
+        return []
     filter_criteria = {"domain": ObjectId(domain_id), "deleted": False}
     if not include_hidden:
         filter_criteria["hidden"] = {"$ne": True}
