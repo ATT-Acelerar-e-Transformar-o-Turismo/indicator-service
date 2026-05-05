@@ -2,6 +2,7 @@ from typing import List, Union, Dict, Optional, Any
 from datetime import datetime, timedelta
 import json
 import re
+import time
 from schemas.data_segment import DataPoint
 from dependencies.database import db
 from dependencies.redis import redis_client
@@ -13,6 +14,81 @@ from fastapi import BackgroundTasks
 from config import settings
 
 logger = logging.getLogger(__name__)
+
+
+# (amount, unit, approx_seconds) — sorted ascending by bucket size
+_AUTO_BUCKETS = [
+    (1, "s", 1),
+    (5, "s", 5),
+    (15, "s", 15),
+    (30, "s", 30),
+    (1, "m", 60),
+    (5, "m", 300),
+    (15, "m", 900),
+    (1, "h", 3600),
+    (6, "h", 21600),
+    (1, "d", 86400),
+    (1, "w", 604800),
+    (1, "M", 2592000),
+    (3, "M", 7776000),
+    (1, "y", 31536000),
+    (5, "y", 157680000),
+]
+_AUTO_GRANULARITY_TTL = 300  # seconds
+_auto_granularity_cache: Dict[tuple, tuple] = {}
+
+
+async def resolve_auto_granularity(indicator_id: str, target: int) -> str:
+    """Pick a bucket size that yields at most `target` points for this indicator's data span.
+
+    Returns a granularity string (e.g. "1M", "1y") or "0" if raw fits within target.
+    Cached in-process for _AUTO_GRANULARITY_TTL seconds per (indicator_id, target).
+    """
+    if target <= 0:
+        return "0"
+
+    cache_key = (indicator_id, target)
+    cached = _auto_granularity_cache.get(cache_key)
+    now = time.monotonic()
+    if cached and (now - cached[1]) < _AUTO_GRANULARITY_TTL:
+        return cached[0]
+
+    try:
+        pipeline = [
+            {"$match": {"indicator_id": ObjectId(indicator_id)}},
+            {"$unwind": "$points"},
+            {"$group": {
+                "_id": None,
+                "min_x": {"$min": "$points.x"},
+                "max_x": {"$max": "$points.x"},
+                "n": {"$sum": 1},
+            }},
+        ]
+        result = await db.merged_indicators.aggregate(pipeline).to_list(1)
+    except (ConnectionFailure, ServerSelectionTimeoutError) as e:
+        logger.error(f"MongoDB error resolving auto granularity for {indicator_id}: {e}")
+        return "0"
+
+    if not result:
+        return "0"
+
+    info = result[0]
+    n = info.get("n", 0)
+    min_x, max_x = info.get("min_x"), info.get("max_x")
+    if n <= target or not isinstance(min_x, datetime) or not isinstance(max_x, datetime):
+        resolved = "0"
+    else:
+        span_seconds = max(1.0, (max_x - min_x).total_seconds())
+        bucket_seconds = span_seconds / target
+        chosen = _AUTO_BUCKETS[-1]
+        for amount, unit, secs in _AUTO_BUCKETS:
+            if secs >= bucket_seconds:
+                chosen = (amount, unit, secs)
+                break
+        resolved = f"{chosen[0]}{chosen[1]}"
+
+    _auto_granularity_cache[cache_key] = (resolved, now)
+    return resolved
 
 
 
@@ -407,7 +483,10 @@ async def get_data_points(
     """Get data points with optional filtering, pagination and aggregation"""
     if start_date and end_date and start_date > end_date:
         raise ValueError("start_date must be before end_date")
-    
+
+    if granularity == "auto":
+        granularity = await resolve_auto_granularity(indicator_id, limit)
+
     # Build cache key with all relevant parameters
     cache_params = {"skip": skip, "limit": limit, "sort": sort}
     if start_date:
