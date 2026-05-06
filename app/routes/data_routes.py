@@ -75,14 +75,17 @@ async def get_indicator_series(
     except (InvalidId, ValueError):
         raise HTTPException(status_code=400, detail=INVALID_INDICATOR_ID)
 
-    series = await get_series_data_points(
-        indicator_id,
-        sort=sort,
-        skip=skip,
-        limit=limit,
-        start_date=start_date,
-        end_date=end_date,
-    )
+    try:
+        series = await get_series_data_points(
+            indicator_id,
+            sort=sort,
+            skip=skip,
+            limit=limit,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     response.headers["X-Total-Count"] = str(len(series))
     return series
 

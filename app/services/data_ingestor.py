@@ -56,17 +56,20 @@ async def merge_indicator_data(indicator_id: str) -> list[DataPoint]:
         if not segment_timestamp:
             continue
 
+        seg_ts = segment_timestamp.replace(tzinfo=None) if segment_timestamp.tzinfo else segment_timestamp
+
         for point in segment["points"]:
             series = point.get("series")
             if isinstance(point["x"], (str, datetime)):
-                x_value = datetime.fromisoformat(point["x"].replace(
+                raw = datetime.fromisoformat(point["x"].replace(
                     'Z', '+00:00')) if isinstance(point["x"], str) else point["x"]
+                x_value = raw.replace(tzinfo=None) if raw.tzinfo else raw
 
                 key = (x_value, series)
                 current = time_series_points.get(key)
-                if not current or segment_timestamp > current[1]:
+                if not current or seg_ts > current[1]:
                     time_series_points[key] = (
-                            point["y"], segment_timestamp)
+                            point["y"], seg_ts)
             else:
                 numeric_points.append(
                         DataPoint(x=float(point["x"]), y=float(point["y"]), series=series))

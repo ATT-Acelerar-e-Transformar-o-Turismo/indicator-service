@@ -509,18 +509,13 @@ async def get_data_points(
     )
 
 
-async def _merge_resource_segments(indicator_id: str, resource_id) -> List[DataPoint]:
-    """Merge all segments for a single (indicator, resource) into sorted points.
+def _merge_segments(segments: list) -> List[DataPoint]:
+    """Merge a pre-fetched list of segments for one (indicator, resource) into sorted points.
 
     Dedup key is (x, series) — same rule as merge_indicator_data. Distinct
     series within a resource stay distinct (one chart line each); legacy
     series-less points share the (x, None) key.
     """
-    segments = await db.data_segments.find({
-        "indicator_id": ObjectId(indicator_id),
-        "resource_id": resource_id,
-    }).to_list(None)
-
     time_points: Dict[tuple, tuple] = {}
     numeric_points: List[DataPoint] = []
 
@@ -533,11 +528,11 @@ async def _merge_resource_segments(indicator_id: str, resource_id) -> List[DataP
             series = point.get("series")
             if isinstance(x_raw, str):
                 try:
-                    x_val = datetime.fromisoformat(x_raw.replace("Z", "+00:00"))
+                    x_val = _to_naive_utc(datetime.fromisoformat(x_raw.replace("Z", "+00:00")))
                 except ValueError:
                     continue
             else:
-                x_val = x_raw
+                x_val = _to_naive_utc(x_raw) if isinstance(x_raw, datetime) else x_raw
 
             if isinstance(x_val, datetime):
                 key = (x_val, series)
@@ -590,14 +585,18 @@ async def get_series_data_points(
     if sd and ed and sd > ed:
         raise ValueError("start_date must be before end_date")
 
-    resource_ids = await db.data_segments.distinct(
-        "resource_id",
+    all_segments = await db.data_segments.find(
         {"indicator_id": ObjectId(indicator_id)},
-    )
+    ).to_list(None)
+
+    segments_by_resource: Dict[Any, list] = {}
+    for seg in all_segments:
+        rid = seg.get("resource_id")
+        segments_by_resource.setdefault(rid, []).append(seg)
 
     series_list: List[Dict[str, Any]] = []
-    for rid in resource_ids:
-        points = await _merge_resource_segments(indicator_id, rid)
+    for rid, segments in segments_by_resource.items():
+        points = _merge_segments(segments)
 
         if sd or ed:
             def _in_range(p):
@@ -612,8 +611,13 @@ async def get_series_data_points(
         for p in points:
             by_series.setdefault(p.series, []).append(p)
 
+        def _point_sort_key(p):
+            if isinstance(p.x, datetime):
+                return (0, _to_naive_utc(p.x), 0.0)
+            return (1, datetime.min, float(p.x))
+
         for series_label, group in by_series.items():
-            group.sort(key=lambda p: p.x, reverse=(sort == "desc"))
+            group.sort(key=_point_sort_key, reverse=(sort == "desc"))
             paged = group[skip:skip + limit]
             series_list.append({
                 "resource_id": str(rid),
