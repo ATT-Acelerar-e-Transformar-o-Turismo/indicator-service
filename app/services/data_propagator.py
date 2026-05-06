@@ -554,6 +554,20 @@ async def _merge_resource_segments(indicator_id: str, resource_id) -> List[DataP
     return sorted(pts, key=lambda p: p.x)
 
 
+def _to_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """MongoDB returns naive UTC datetimes; FastAPI parses query strings
+    like `1993-01-01T00:00:00.000Z` as tz-aware. Comparing the two raises
+    TypeError ("can't compare offset-naive and offset-aware datetimes"),
+    so normalise everything to naive UTC before comparing.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt
+    from datetime import timezone
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+
 async def get_series_data_points(
         indicator_id: str,
         sort: str = "asc",
@@ -571,7 +585,9 @@ async def get_series_data_points(
     series here — one entry per column. Resources with no series labels
     produce a single entry with series_label=None (legacy behaviour).
     """
-    if start_date and end_date and start_date > end_date:
+    sd = _to_naive_utc(start_date)
+    ed = _to_naive_utc(end_date)
+    if sd and ed and sd > ed:
         raise ValueError("start_date must be before end_date")
 
     resource_ids = await db.data_segments.distinct(
@@ -583,13 +599,13 @@ async def get_series_data_points(
     for rid in resource_ids:
         points = await _merge_resource_segments(indicator_id, rid)
 
-        if start_date or end_date:
-            points = [
-                p for p in points
-                if isinstance(p.x, datetime)
-                and (not start_date or p.x >= start_date)
-                and (not end_date or p.x <= end_date)
-            ]
+        if sd or ed:
+            def _in_range(p):
+                if not isinstance(p.x, datetime):
+                    return True  # numeric x can't be date-filtered; keep
+                x = _to_naive_utc(p.x)
+                return (not sd or x >= sd) and (not ed or x <= ed)
+            points = [p for p in points if _in_range(p)]
 
         # Group by series label inside this resource.
         by_series: Dict[Optional[str], List[DataPoint]] = {}

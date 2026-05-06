@@ -1,8 +1,20 @@
 from pydantic import BaseModel, Field, field_validator, model_validator
-from typing import Optional, List
+from typing import Optional, List, Dict
 from schemas.domain import Domain
 from schemas.common import PyObjectId
 from schemas.chart_export import ChartType
+
+
+class SeriesTranslation(BaseModel):
+    """PT/EN labels for a single data column (series_label).
+
+    Seeded by the resource-service Gemini sidecar, editable in the admin
+    indicator wizard. Either side may be empty if the source language is
+    already the target.
+    """
+
+    pt: str = ""
+    en: str = ""
 
 
 DEFAULT_CHART_TYPES: List[ChartType] = [
@@ -32,6 +44,15 @@ class IndicatorBase(BaseModel):
     carrying_capacity: Optional[str] = None
     chart_types: List[ChartType] = Field(default_factory=lambda: list(DEFAULT_CHART_TYPES))
     default_chart_type: ChartType = DEFAULT_CHART_TYPE
+    # Series labels (column names from data wrappers) the admin has toggled
+    # off. The public chart filters these out so the data stays in storage but
+    # is hidden from end users — same lever as the wrapper-time column picker
+    # but applied post hoc, without re-running the wrapper.
+    hidden_series: List[str] = Field(default_factory=list)
+    # PT/EN translations for each series_label, keyed by the original label
+    # from the data wrapper. Seeded by resource-service after wrapper
+    # completion (Gemini sidecar) and editable in the admin wizard.
+    series_translations: Dict[str, SeriesTranslation] = Field(default_factory=dict)
 
     @field_validator("chart_types")
     @classmethod
@@ -87,6 +108,8 @@ class IndicatorPatch(BaseModel):
     carrying_capacity: Optional[str] = None
     chart_types: Optional[List[ChartType]] = None
     default_chart_type: Optional[ChartType] = None
+    hidden_series: Optional[List[str]] = None
+    series_translations: Optional[Dict[str, SeriesTranslation]] = None
 
     @model_validator(mode="after")
     def _patch_chart_consistency(self) -> "IndicatorPatch":

@@ -9,7 +9,7 @@ only the merge / filter / sort / pagination logic — no MongoDB roundtrip.
 
 import unittest
 from unittest.mock import MagicMock, AsyncMock, patch
-from datetime import datetime
+from datetime import datetime, timezone
 from bson.objectid import ObjectId
 
 import services.data_propagator as propagator
@@ -263,6 +263,34 @@ class GetSeriesDataPointsTests(unittest.IsolatedAsyncioTestCase):
         mock_db = self._build_db({})  # no resources have data
         with patch.object(propagator, "db", mock_db):
             series = await propagator.get_series_data_points("507f1f77bcf86cd799439099")
+        self.assertEqual(series, [])
+
+    async def test_timezone_aware_query_dates_dont_crash(self):
+        # Regression: FastAPI parses `?end_date=1993-01-01T00:00:00.000Z` as a
+        # tz-AWARE datetime, while MongoDB returns NAIVE datetimes. Comparing
+        # the two raises TypeError → 500. The lazy-load loop on the chart kept
+        # firing this on every pan, spamming the backend. _to_naive_utc must
+        # normalise both sides before the range filter runs.
+        rid = ObjectId("507f1f77bcf86cd799439010")
+        ts = datetime(2024, 1, 1)  # naive (mongo-style)
+        mock_db = self._build_db({
+            rid: [_segment(ts, [
+                {"x": datetime(2020, 1, 1), "y": 1.0},   # naive
+                {"x": datetime(2021, 1, 1), "y": 2.0},
+            ])]
+        })
+
+        # Aware UTC end_date (what FastAPI hands us from the URL):
+        end_aware = datetime(1993, 1, 1, tzinfo=timezone.utc)
+
+        with patch.object(propagator, "db", mock_db):
+            series = await propagator.get_series_data_points(
+                "507f1f77bcf86cd799439099", end_date=end_aware,
+            )
+
+        # 1993 is before any data → all points filter out → no entries in
+        # the response, NOT a TypeError-driven 500. The point of this test
+        # is "doesn't crash"; the empty result is the natural consequence.
         self.assertEqual(series, [])
 
 

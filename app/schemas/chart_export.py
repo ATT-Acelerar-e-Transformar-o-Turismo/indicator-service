@@ -9,6 +9,8 @@ class ChartType(str, Enum):
     area = "area"
     bar = "bar"
     column = "column"
+    stackedColumn = "stackedColumn"
+    stackedBar = "stackedBar"
     scatter = "scatter"
     # Aggregate visualizations: derived from {x,y} time-series data
     pie = "pie"
