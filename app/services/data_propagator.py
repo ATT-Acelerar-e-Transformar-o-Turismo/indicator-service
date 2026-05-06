@@ -563,28 +563,25 @@ def _to_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-async def get_series_data_points(
-        indicator_id: str,
-        sort: str = "asc",
-        skip: int = 0,
-        limit: int = 1000,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None,
+_COMPOSED_DEPTH_CAP = 8  # belt-and-braces; cycles are also rejected at write time
+
+
+async def _own_series_for_indicator(
+    indicator_id: str,
+    sd: Optional[datetime],
+    ed: Optional[datetime],
+    sort: str,
+    skip: int,
+    limit: int,
+    source_indicator_id: str,
+    source_indicator_name: str,
+    source_indicator_name_en: str,
 ) -> List[Dict[str, Any]]:
-    """One chart line per (resource_id, series_label) pair.
-
-    Returns: [{"resource_id": str, "series_label": str|None,
-               "points": [{"x": iso|float, "y": float}, ...]}, ...]
-
-    A single XLSX with N value columns lives in ONE resource but produces N
-    series here — one entry per column. Resources with no series labels
-    produce a single entry with series_label=None (legacy behaviour).
+    """Build the (resource_id, series_label) → points list for ONE indicator's
+    own data segments. Pulled out of `get_series_data_points` so composed
+    indicators can call it once per ancestor in the tree without re-doing the
+    surrounding orchestration.
     """
-    sd = _to_naive_utc(start_date)
-    ed = _to_naive_utc(end_date)
-    if sd and ed and sd > ed:
-        raise ValueError("start_date must be before end_date")
-
     all_segments = await db.data_segments.find(
         {"indicator_id": ObjectId(indicator_id)},
     ).to_list(None)
@@ -594,6 +591,11 @@ async def get_series_data_points(
         rid = seg.get("resource_id")
         segments_by_resource.setdefault(rid, []).append(seg)
 
+    def _point_sort_key(p):
+        if isinstance(p.x, datetime):
+            return (0, _to_naive_utc(p.x), 0.0)
+        return (1, datetime.min, float(p.x))
+
     series_list: List[Dict[str, Any]] = []
     for rid, segments in segments_by_resource.items():
         points = _merge_segments(segments)
@@ -601,20 +603,14 @@ async def get_series_data_points(
         if sd or ed:
             def _in_range(p):
                 if not isinstance(p.x, datetime):
-                    return True  # numeric x can't be date-filtered; keep
+                    return True
                 x = _to_naive_utc(p.x)
                 return (not sd or x >= sd) and (not ed or x <= ed)
             points = [p for p in points if _in_range(p)]
 
-        # Group by series label inside this resource.
         by_series: Dict[Optional[str], List[DataPoint]] = {}
         for p in points:
             by_series.setdefault(p.series, []).append(p)
-
-        def _point_sort_key(p):
-            if isinstance(p.x, datetime):
-                return (0, _to_naive_utc(p.x), 0.0)
-            return (1, datetime.min, float(p.x))
 
         for series_label, group in by_series.items():
             group.sort(key=_point_sort_key, reverse=(sort == "desc"))
@@ -629,8 +625,69 @@ async def get_series_data_points(
                     }
                     for p in paged
                 ],
+                "source_indicator_id": source_indicator_id,
+                "source_indicator_name": source_indicator_name,
+                "source_indicator_name_en": source_indicator_name_en,
             })
 
+    return series_list
+
+
+async def get_series_data_points(
+        indicator_id: str,
+        sort: str = "asc",
+        skip: int = 0,
+        limit: int = 1000,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+) -> List[Dict[str, Any]]:
+    """One chart line per (source_indicator_id, resource_id, series_label).
+
+    For a plain indicator this is one entry per (resource_id, series_label),
+    with source_indicator_* identifying the requested indicator.
+
+    For a composed indicator (one with `child_indicators` populated) the
+    response also includes every child's own series, walked transitively
+    with cycle protection — equivalent to inlining each child's chart into
+    the parent.
+    """
+    sd = _to_naive_utc(start_date)
+    ed = _to_naive_utc(end_date)
+    if sd and ed and sd > ed:
+        raise ValueError("start_date must be before end_date")
+
+    series_list: List[Dict[str, Any]] = []
+    visited: set = set()
+
+    async def _walk(current_id: str, depth: int) -> None:
+        if depth > _COMPOSED_DEPTH_CAP:
+            return
+        if current_id in visited:
+            return
+        visited.add(current_id)
+        try:
+            current_oid = ObjectId(current_id)
+        except (TypeError, ValueError):
+            return
+        indicator_doc = await db.indicators.find_one(
+            {"_id": current_oid, "deleted": False}
+        )
+        if not indicator_doc:
+            return
+
+        own = await _own_series_for_indicator(
+            current_id,
+            sd, ed, sort, skip, limit,
+            source_indicator_id=current_id,
+            source_indicator_name=indicator_doc.get("name") or "",
+            source_indicator_name_en=indicator_doc.get("name_en") or "",
+        )
+        series_list.extend(own)
+
+        for child_id in indicator_doc.get("child_indicators", []) or []:
+            await _walk(str(child_id), depth + 1)
+
+    await _walk(str(indicator_id), 0)
     return series_list
 
 

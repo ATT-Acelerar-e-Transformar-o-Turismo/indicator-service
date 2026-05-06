@@ -1,5 +1,6 @@
 from typing import List, Optional
 from bson.objectid import ObjectId
+from bson.errors import InvalidId
 from pymongo.collation import Collation
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 from dependencies.database import db
@@ -504,6 +505,104 @@ async def get_indicator_resources(indicator_id: str) -> List[str]:
         return []
 
     return resources_data
+
+
+async def _is_descendant(ancestor_id: str, candidate_id: str, visited: Optional[set] = None) -> bool:
+    """True iff `ancestor_id` is reachable from `candidate_id` via child_indicators.
+
+    Used to reject cycles when adding `candidate_id` as a child of `ancestor_id`:
+    if the ancestor already lives somewhere in the candidate's subtree, the
+    new edge would close a cycle.
+    """
+    if visited is None:
+        visited = set()
+    if candidate_id in visited:
+        return False
+    visited.add(candidate_id)
+    if candidate_id == ancestor_id:
+        return True
+    try:
+        candidate_oid = ObjectId(candidate_id)
+    except (InvalidId, TypeError, ValueError):
+        return False
+    candidate = await db.indicators.find_one(
+        {"_id": candidate_oid, "deleted": False}
+    )
+    if not candidate:
+        return False
+    for child_id in candidate.get("child_indicators", []) or []:
+        if await _is_descendant(ancestor_id, str(child_id), visited):
+            return True
+    return False
+
+
+async def add_child_indicator(parent_id: str, child_id: str) -> Optional[dict]:
+    """Add `child_id` to `parent_id`'s child_indicators list (idempotent).
+
+    Rejects self-inclusion and cycles. Both indicators must exist and not be
+    deleted. Returns the updated parent indicator on success.
+    """
+    if parent_id == child_id:
+        raise ValueError("An indicator cannot include itself")
+
+    parent = await db.indicators.find_one(
+        {"_id": ObjectId(parent_id), "deleted": False}
+    )
+    if not parent:
+        raise ValueError("Parent indicator not found")
+    child = await db.indicators.find_one(
+        {"_id": ObjectId(child_id), "deleted": False}
+    )
+    if not child:
+        raise ValueError("Child indicator not found")
+
+    # Cycle check: if `parent` is already reachable from `child`, adding the
+    # edge would close a cycle.
+    if await _is_descendant(parent_id, child_id):
+        raise ValueError("Adding this indicator would create a cycle")
+
+    await db.indicators.update_one(
+        {"_id": ObjectId(parent_id), "deleted": False},
+        {"$addToSet": {"child_indicators": child_id}},
+    )
+    return await get_indicator_by_id(parent_id)
+
+
+async def remove_child_indicator(parent_id: str, child_id: str) -> Optional[dict]:
+    """Remove `child_id` from `parent_id`'s child_indicators list."""
+    result = await db.indicators.update_one(
+        {"_id": ObjectId(parent_id), "deleted": False},
+        {"$pull": {"child_indicators": child_id}},
+    )
+    if result.matched_count == 0:
+        return None
+    return await get_indicator_by_id(parent_id)
+
+
+async def get_child_indicators(indicator_id: str) -> List[str]:
+    """Return the child_indicators list for `indicator_id` (or []).
+
+    Filters out IDs of deleted indicators so the response reflects only
+    currently-valid children.
+    """
+    indicator = await db.indicators.find_one(
+        {"_id": ObjectId(indicator_id), "deleted": False}
+    )
+    if not indicator:
+        return []
+    raw = indicator.get("child_indicators", []) or []
+    if not raw:
+        return []
+    try:
+        oids = [ObjectId(c) for c in raw]
+    except (InvalidId, TypeError, ValueError):
+        return [str(c) for c in raw]
+    alive = await db.indicators.find(
+        {"_id": {"$in": oids}, "deleted": False},
+        {"_id": 1},
+    ).to_list(None)
+    alive_ids = {str(d["_id"]) for d in alive}
+    return [str(c) for c in raw if str(c) in alive_ids]
 
 
 async def get_indicator_by_resource(resource_id: str) -> Optional[dict]:

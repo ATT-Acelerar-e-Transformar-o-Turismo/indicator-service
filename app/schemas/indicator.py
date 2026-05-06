@@ -53,6 +53,12 @@ class IndicatorBase(BaseModel):
     # from the data wrapper. Seeded by resource-service after wrapper
     # completion (Gemini sidecar) and editable in the admin wizard.
     series_translations: Dict[str, SeriesTranslation] = Field(default_factory=dict)
+    # Other indicators whose data should appear on this indicator's chart
+    # alongside its own resources. Each child contributes its full series
+    # tree (transitive); cycles are rejected at write time and a depth cap
+    # protects against runtime regressions. Empty for non-composed
+    # indicators.
+    child_indicators: List[str] = Field(default_factory=list)
 
     @field_validator("chart_types")
     @classmethod
@@ -110,6 +116,7 @@ class IndicatorPatch(BaseModel):
     default_chart_type: Optional[ChartType] = None
     hidden_series: Optional[List[str]] = None
     series_translations: Optional[Dict[str, SeriesTranslation]] = None
+    child_indicators: Optional[List[str]] = None
 
     @model_validator(mode="after")
     def _patch_chart_consistency(self) -> "IndicatorPatch":
