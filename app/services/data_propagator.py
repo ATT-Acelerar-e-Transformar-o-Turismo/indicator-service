@@ -493,11 +493,11 @@ async def get_data_points(
         cache_params["start_date"] = start_date.isoformat()
     if end_date:
         cache_params["end_date"] = end_date.isoformat()
-    
+
     cache_key = get_cache_key(indicator_id, granularity, aggregator, **cache_params)
     pipeline = _build_query_pipeline(indicator_id, granularity, aggregator, sort, skip, limit, start_date, end_date)
     cache_processor = _build_cache_processor(sort, skip, limit, start_date, end_date)
-    
+
     return await _get_data_points(
         indicator_id=indicator_id,
         granularity=granularity,
@@ -507,5 +507,130 @@ async def get_data_points(
         full_cache_processor=cache_processor,
         background_tasks=background_tasks
     )
+
+
+def _merge_segments(segments: list) -> List[DataPoint]:
+    """Merge a pre-fetched list of segments for one (indicator, resource) into sorted points.
+
+    Dedup key is (x, series) — same rule as merge_indicator_data. Distinct
+    series within a resource stay distinct (one chart line each); legacy
+    series-less points share the (x, None) key.
+    """
+    time_points: Dict[tuple, tuple] = {}
+    numeric_points: List[DataPoint] = []
+
+    for segment in segments:
+        seg_ts = segment.get("timestamp")
+        if not seg_ts:
+            continue
+        for point in segment.get("points", []):
+            x_raw = point.get("x")
+            series = point.get("series")
+            if isinstance(x_raw, str):
+                try:
+                    x_val = _to_naive_utc(datetime.fromisoformat(x_raw.replace("Z", "+00:00")))
+                except ValueError:
+                    continue
+            else:
+                x_val = _to_naive_utc(x_raw) if isinstance(x_raw, datetime) else x_raw
+
+            if isinstance(x_val, datetime):
+                key = (x_val, series)
+                cur = time_points.get(key)
+                if not cur or seg_ts > cur[1]:
+                    time_points[key] = (point["y"], seg_ts)
+            else:
+                try:
+                    numeric_points.append(DataPoint(x=float(x_val), y=float(point["y"]), series=series))
+                except (TypeError, ValueError):
+                    continue
+
+    pts = [DataPoint(x=x, y=y, series=series) for (x, series), (y, _) in time_points.items()] + numeric_points
+    return sorted(pts, key=lambda p: p.x)
+
+
+def _to_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """MongoDB returns naive UTC datetimes; FastAPI parses query strings
+    like `1993-01-01T00:00:00.000Z` as tz-aware. Comparing the two raises
+    TypeError ("can't compare offset-naive and offset-aware datetimes"),
+    so normalise everything to naive UTC before comparing.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt
+    from datetime import timezone
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+async def get_series_data_points(
+        indicator_id: str,
+        sort: str = "asc",
+        skip: int = 0,
+        limit: int = 1000,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+) -> List[Dict[str, Any]]:
+    """One chart line per (resource_id, series_label) pair.
+
+    Returns: [{"resource_id": str, "series_label": str|None,
+               "points": [{"x": iso|float, "y": float}, ...]}, ...]
+
+    A single XLSX with N value columns lives in ONE resource but produces N
+    series here — one entry per column. Resources with no series labels
+    produce a single entry with series_label=None (legacy behaviour).
+    """
+    sd = _to_naive_utc(start_date)
+    ed = _to_naive_utc(end_date)
+    if sd and ed and sd > ed:
+        raise ValueError("start_date must be before end_date")
+
+    all_segments = await db.data_segments.find(
+        {"indicator_id": ObjectId(indicator_id)},
+    ).to_list(None)
+
+    segments_by_resource: Dict[Any, list] = {}
+    for seg in all_segments:
+        rid = seg.get("resource_id")
+        segments_by_resource.setdefault(rid, []).append(seg)
+
+    series_list: List[Dict[str, Any]] = []
+    for rid, segments in segments_by_resource.items():
+        points = _merge_segments(segments)
+
+        if sd or ed:
+            def _in_range(p):
+                if not isinstance(p.x, datetime):
+                    return True  # numeric x can't be date-filtered; keep
+                x = _to_naive_utc(p.x)
+                return (not sd or x >= sd) and (not ed or x <= ed)
+            points = [p for p in points if _in_range(p)]
+
+        # Group by series label inside this resource.
+        by_series: Dict[Optional[str], List[DataPoint]] = {}
+        for p in points:
+            by_series.setdefault(p.series, []).append(p)
+
+        def _point_sort_key(p):
+            if isinstance(p.x, datetime):
+                return (0, _to_naive_utc(p.x), 0.0)
+            return (1, datetime.min, float(p.x))
+
+        for series_label, group in by_series.items():
+            group.sort(key=_point_sort_key, reverse=(sort == "desc"))
+            paged = group[skip:skip + limit]
+            series_list.append({
+                "resource_id": str(rid),
+                "series_label": series_label,
+                "points": [
+                    {
+                        "x": p.x.isoformat() if isinstance(p.x, datetime) else float(p.x),
+                        "y": p.y,
+                    }
+                    for p in paged
+                ],
+            })
+
+    return series_list
 
 

@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     RESOURCE_DELETED_QUEUE: str = Field(
         default="resource_deleted", env="RESOURCE_DELETED_QUEUE"
     )
+    WRAPPER_TRANSLATIONS_QUEUE: str = Field(
+        default="wrapper_translations", env="WRAPPER_TRANSLATIONS_QUEUE"
+    )
     REDIS_URL: str = Field(default="redis://indicators-redis:6379", env="REDIS_URL")
 
     # Cache settings
