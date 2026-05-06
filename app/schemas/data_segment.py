@@ -7,11 +7,16 @@ from schemas.common import PyObjectId
 class DataPoint(BaseModel):
     x: datetime | float
     y: float
+    # Optional series label. Multi-column files (one resource → many series)
+    # tag each emitted point with the column name; single-source resources
+    # leave it None.
+    series: Optional[str] = None
 
 
 class TimePoint(BaseModel):
     x: datetime
     y: float
+    series: Optional[str] = None
 
 
 class DataSegmentBase(BaseModel):
@@ -33,3 +38,13 @@ class MergedIndicator(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class IndicatorSeries(BaseModel):
+    """One line on the chart. Identified by (resource_id, series_label):
+    a single resource can contribute several series when the source file has
+    multiple value columns. series_label is None for legacy single-stream
+    resources (one wrapper → one untagged series)."""
+    resource_id: str
+    series_label: Optional[str] = None
+    points: List[DataPoint]

@@ -2,10 +2,10 @@ from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Response
 from typing import List, Optional
 from datetime import datetime
 import re
-from schemas.data_segment import DataPoint
+from schemas.data_segment import DataPoint, IndicatorSeries
 from schemas.common import PyObjectId
 from bson.errors import InvalidId
-from services.data_propagator import get_data_points
+from services.data_propagator import get_data_points, get_series_data_points
 from services.statistics_service import get_indicator_statistics
 from schemas.statistics import IndicatorStatistics
 from config import settings
@@ -57,6 +57,34 @@ async def get_indicator_data(
     )
     response.headers["X-Total-Count"] = str(len(points))
     return points
+
+
+@router.get("/{indicator_id}/series", response_model=List[IndicatorSeries])
+async def get_indicator_series(
+    indicator_id: str,
+    response: Response,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(1000, ge=1, le=10000),
+    sort: str = Query("asc", regex="^(asc|desc)$"),
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+):
+    """One timeseries per resource. Each entry feeds a separate line on the chart."""
+    try:
+        PyObjectId(indicator_id)
+    except (InvalidId, ValueError):
+        raise HTTPException(status_code=400, detail=INVALID_INDICATOR_ID)
+
+    series = await get_series_data_points(
+        indicator_id,
+        sort=sort,
+        skip=skip,
+        limit=limit,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    response.headers["X-Total-Count"] = str(len(series))
+    return series
 
 
 @router.get("/{indicator_id}/statistics", response_model=IndicatorStatistics)

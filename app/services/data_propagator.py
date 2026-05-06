@@ -493,11 +493,11 @@ async def get_data_points(
         cache_params["start_date"] = start_date.isoformat()
     if end_date:
         cache_params["end_date"] = end_date.isoformat()
-    
+
     cache_key = get_cache_key(indicator_id, granularity, aggregator, **cache_params)
     pipeline = _build_query_pipeline(indicator_id, granularity, aggregator, sort, skip, limit, start_date, end_date)
     cache_processor = _build_cache_processor(sort, skip, limit, start_date, end_date)
-    
+
     return await _get_data_points(
         indicator_id=indicator_id,
         granularity=granularity,
@@ -507,5 +507,110 @@ async def get_data_points(
         full_cache_processor=cache_processor,
         background_tasks=background_tasks
     )
+
+
+async def _merge_resource_segments(indicator_id: str, resource_id) -> List[DataPoint]:
+    """Merge all segments for a single (indicator, resource) into sorted points.
+
+    Dedup key is (x, series) — same rule as merge_indicator_data. Distinct
+    series within a resource stay distinct (one chart line each); legacy
+    series-less points share the (x, None) key.
+    """
+    segments = await db.data_segments.find({
+        "indicator_id": ObjectId(indicator_id),
+        "resource_id": resource_id,
+    }).to_list(None)
+
+    time_points: Dict[tuple, tuple] = {}
+    numeric_points: List[DataPoint] = []
+
+    for segment in segments:
+        seg_ts = segment.get("timestamp")
+        if not seg_ts:
+            continue
+        for point in segment.get("points", []):
+            x_raw = point.get("x")
+            series = point.get("series")
+            if isinstance(x_raw, str):
+                try:
+                    x_val = datetime.fromisoformat(x_raw.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+            else:
+                x_val = x_raw
+
+            if isinstance(x_val, datetime):
+                key = (x_val, series)
+                cur = time_points.get(key)
+                if not cur or seg_ts > cur[1]:
+                    time_points[key] = (point["y"], seg_ts)
+            else:
+                try:
+                    numeric_points.append(DataPoint(x=float(x_val), y=float(point["y"]), series=series))
+                except (TypeError, ValueError):
+                    continue
+
+    pts = [DataPoint(x=x, y=y, series=series) for (x, series), (y, _) in time_points.items()] + numeric_points
+    return sorted(pts, key=lambda p: p.x)
+
+
+async def get_series_data_points(
+        indicator_id: str,
+        sort: str = "asc",
+        skip: int = 0,
+        limit: int = 1000,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+) -> List[Dict[str, Any]]:
+    """One chart line per (resource_id, series_label) pair.
+
+    Returns: [{"resource_id": str, "series_label": str|None,
+               "points": [{"x": iso|float, "y": float}, ...]}, ...]
+
+    A single XLSX with N value columns lives in ONE resource but produces N
+    series here — one entry per column. Resources with no series labels
+    produce a single entry with series_label=None (legacy behaviour).
+    """
+    if start_date and end_date and start_date > end_date:
+        raise ValueError("start_date must be before end_date")
+
+    resource_ids = await db.data_segments.distinct(
+        "resource_id",
+        {"indicator_id": ObjectId(indicator_id)},
+    )
+
+    series_list: List[Dict[str, Any]] = []
+    for rid in resource_ids:
+        points = await _merge_resource_segments(indicator_id, rid)
+
+        if start_date or end_date:
+            points = [
+                p for p in points
+                if isinstance(p.x, datetime)
+                and (not start_date or p.x >= start_date)
+                and (not end_date or p.x <= end_date)
+            ]
+
+        # Group by series label inside this resource.
+        by_series: Dict[Optional[str], List[DataPoint]] = {}
+        for p in points:
+            by_series.setdefault(p.series, []).append(p)
+
+        for series_label, group in by_series.items():
+            group.sort(key=lambda p: p.x, reverse=(sort == "desc"))
+            paged = group[skip:skip + limit]
+            series_list.append({
+                "resource_id": str(rid),
+                "series_label": series_label,
+                "points": [
+                    {
+                        "x": p.x.isoformat() if isinstance(p.x, datetime) else float(p.x),
+                        "y": p.y,
+                    }
+                    for p in paged
+                ],
+            })
+
+    return series_list
 
 
