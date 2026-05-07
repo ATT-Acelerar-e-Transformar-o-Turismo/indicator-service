@@ -34,6 +34,11 @@ async def create_indicator(
     domain_id: str, subdomain_name: str, indicator_data: IndicatorCreate
 ) -> Optional[dict]:
     indicator_dict = deserialize(indicator_data.dict())
+    # Composed indicators are managed only through the dedicated
+    # /child-indicators endpoints, which run cycle / self-inclusion / existence
+    # checks. Newly created indicators always start with no children — strip
+    # whatever the caller sent here so they can't sneak in a pre-built tree.
+    indicator_dict.pop("child_indicators", None)
     indicator_dict["_id"] = ObjectId()
     domain = await db.domains.find_one({"_id": ObjectId(domain_id)})
     if not domain:
@@ -350,6 +355,11 @@ async def get_indicator_by_id(indicator_id: str) -> Optional[dict]:
 
 
 async def update_indicator(indicator_id: str, update_data: dict) -> int:
+    # PUT/PATCH must not touch child_indicators — the dedicated endpoints
+    # enforce cycle / self-inclusion / existence checks that this generic
+    # update path doesn't run. Strip the field defensively so neither route
+    # can be used to bypass those guards (incl. constructing a cycle).
+    update_data = {k: v for k, v in update_data.items() if k != "child_indicators"}
     if "domain" in update_data:
         domain_id = update_data["domain"]
         domain = await db.domains.find_one({"_id": ObjectId(domain_id)})
@@ -593,16 +603,26 @@ async def get_child_indicators(indicator_id: str) -> List[str]:
     raw = indicator.get("child_indicators", []) or []
     if not raw:
         return []
-    try:
-        oids = [ObjectId(c) for c in raw]
-    except (InvalidId, TypeError, ValueError):
-        return [str(c) for c in raw]
+    # Validate each id individually — a single malformed entry must not skip
+    # the deletion filter for the rest. Bad entries are dropped (they can't
+    # refer to a real indicator anyway).
+    oids: List[ObjectId] = []
+    valid_str_ids: List[str] = []
+    for c in raw:
+        try:
+            oid = ObjectId(c)
+        except (InvalidId, TypeError, ValueError):
+            continue
+        oids.append(oid)
+        valid_str_ids.append(str(oid))
+    if not oids:
+        return []
     alive = await db.indicators.find(
         {"_id": {"$in": oids}, "deleted": False},
         {"_id": 1},
     ).to_list(None)
     alive_ids = {str(d["_id"]) for d in alive}
-    return [str(c) for c in raw if str(c) in alive_ids]
+    return [s for s in valid_str_ids if s in alive_ids]
 
 
 async def get_indicator_by_resource(resource_id: str) -> Optional[dict]:

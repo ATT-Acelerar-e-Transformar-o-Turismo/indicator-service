@@ -7,6 +7,7 @@ from schemas.data_segment import DataPoint
 from dependencies.database import db
 from dependencies.redis import redis_client
 from bson.objectid import ObjectId
+from bson.errors import InvalidId
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 from redis.exceptions import ConnectionError as RedisConnectionError, TimeoutError as RedisTimeoutError
 import logging
@@ -667,7 +668,7 @@ async def get_series_data_points(
         visited.add(current_id)
         try:
             current_oid = ObjectId(current_id)
-        except (TypeError, ValueError):
+        except (InvalidId, TypeError, ValueError):
             return
         indicator_doc = await db.indicators.find_one(
             {"_id": current_oid, "deleted": False}

@@ -256,6 +256,86 @@ class GetChildIndicatorsTests(unittest.IsolatedAsyncioTestCase):
             ids = await svc.get_child_indicators(A_ID)
         self.assertEqual(ids, [])
 
+    async def test_one_bad_id_does_not_skip_filter_for_others(self):
+        # Regression: previously, if any entry in child_indicators failed
+        # ObjectId() conversion, the function returned the raw list unfiltered
+        # — leaking deleted IDs and the bad entry itself.
+        mock_db, state = _build_db([
+            _doc(A_ID),
+            _doc(B_ID),
+            _doc(C_ID, deleted=True),
+        ])
+        # Inject a malformed entry alongside valid ones.
+        state[ObjectId(A_ID)]["child_indicators"] = [B_ID, "garbage", C_ID]
+        with patch.object(svc, "db", mock_db):
+            ids = await svc.get_child_indicators(A_ID)
+        # Only B remains: the garbage entry is dropped, C is filtered as
+        # deleted.
+        self.assertEqual(ids, [B_ID])
+
+
+class UpdateBypassPreventionTests(unittest.IsolatedAsyncioTestCase):
+    """PUT/PATCH/POST routes go through update_indicator / create_indicator;
+    those generic paths must NOT touch child_indicators (the dedicated
+    endpoints run the cycle checks). Confirm both strip the field defensively.
+    """
+
+    async def test_update_indicator_strips_child_indicators(self):
+        mock_db = MagicMock()
+        captured = {}
+
+        async def update_one(query, update):
+            captured["update"] = update
+            return MagicMock(matched_count=1, modified_count=1)
+
+        mock_db.indicators.update_one = AsyncMock(side_effect=update_one)
+        with patch.object(svc, "db", mock_db):
+            await svc.update_indicator(A_ID, {
+                "name": "renamed",
+                "child_indicators": [B_ID],  # bypass attempt
+            })
+
+        # The $set payload must NOT include child_indicators.
+        set_payload = captured["update"].get("$set", {})
+        self.assertIn("name", set_payload)
+        self.assertNotIn("child_indicators", set_payload)
+
+    async def test_create_indicator_strips_child_indicators(self):
+        from schemas.indicator import IndicatorCreate
+
+        mock_db = MagicMock()
+        inserted_doc = {}
+
+        async def insert_one(doc):
+            inserted_doc.update(doc)
+            return MagicMock(inserted_id=doc["_id"])
+
+        async def find_one_domain(query):
+            return {"_id": query["_id"], "name": "D",
+                    "subdomains": [{"name": "sub"}], "deleted": False}
+
+        async def find_one_indicator(query):
+            return {**inserted_doc, "domain": ObjectId("507f1f77bcf86cd799439999")}
+
+        mock_db.indicators.insert_one = AsyncMock(side_effect=insert_one)
+        mock_db.indicators.find_one = AsyncMock(side_effect=find_one_indicator)
+        mock_db.domains.find_one = AsyncMock(side_effect=find_one_domain)
+
+        # Build a minimal IndicatorCreate. The default chart_types include
+        # 'line', so default_chart_type='line' satisfies the validator.
+        create = IndicatorCreate(
+            name="x", periodicity="annual", favourites=0, governance=False,
+            child_indicators=[B_ID],  # bypass attempt
+        )
+
+        with patch.object(svc, "db", mock_db):
+            await svc.create_indicator(
+                "507f1f77bcf86cd799439999", "sub", create,
+            )
+
+        # The persisted doc must NOT carry child_indicators from the payload.
+        self.assertNotIn("child_indicators", inserted_doc)
+
 
 if __name__ == "__main__":
     unittest.main()

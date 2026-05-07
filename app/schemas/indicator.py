@@ -116,7 +116,10 @@ class IndicatorPatch(BaseModel):
     default_chart_type: Optional[ChartType] = None
     hidden_series: Optional[List[str]] = None
     series_translations: Optional[Dict[str, SeriesTranslation]] = None
-    child_indicators: Optional[List[str]] = None
+    # NOTE: `child_indicators` deliberately omitted — composed indicators are
+    # managed via POST/DELETE /{id}/child-indicators which run cycle / self-
+    # inclusion / existence checks. Letting PATCH overwrite the list would
+    # bypass those guards.
 
     @model_validator(mode="after")
     def _patch_chart_consistency(self) -> "IndicatorPatch":
