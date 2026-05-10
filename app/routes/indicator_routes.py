@@ -16,7 +16,11 @@ from services.indicator_service import (
     update_indicator,
     delete_indicator,
     add_resource_to_indicator,
+    add_child_indicator,
+    remove_child_indicator,
+    get_child_indicators,
 )
+from pydantic import BaseModel
 from schemas.indicator import (
     IndicatorCreate,
     IndicatorUpdate,
@@ -362,6 +366,63 @@ async def get_resources_route(indicator_id: str):
         return indicator.get("resources", [])
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+class ChildIndicatorRequest(BaseModel):
+    child_id: str
+
+
+@router.post("/{indicator_id}/child-indicators", response_model=Indicator)
+async def add_child_indicator_route(
+    indicator_id: str,
+    body: ChildIndicatorRequest,
+    _=Depends(require_admin),
+):
+    """Include another indicator as a source of this one (composed indicator).
+
+    The child's data tree is appended to this indicator's chart at fetch time;
+    cycles and self-inclusion are rejected.
+    """
+    try:
+        PyObjectId(indicator_id)
+        PyObjectId(body.child_id)
+    except (InvalidId, ValueError):
+        raise HTTPException(status_code=400, detail=INVALID_INDICATOR_ID)
+    try:
+        updated = await add_child_indicator(indicator_id, body.child_id)
+        if not updated:
+            raise HTTPException(status_code=404, detail=NOT_FOUND_MESSAGE)
+        return updated
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/{indicator_id}/child-indicators/{child_id}", response_model=Indicator)
+async def remove_child_indicator_route(
+    indicator_id: str,
+    child_id: str,
+    _=Depends(require_admin),
+):
+    """Remove a previously-added child indicator."""
+    try:
+        PyObjectId(indicator_id)
+        PyObjectId(child_id)
+    except (InvalidId, ValueError):
+        raise HTTPException(status_code=400, detail=INVALID_INDICATOR_ID)
+    updated = await remove_child_indicator(indicator_id, child_id)
+    if not updated:
+        raise HTTPException(status_code=404, detail=NOT_FOUND_MESSAGE)
+    return updated
+
+
+@router.get("/{indicator_id}/child-indicators", response_model=List[str])
+async def get_child_indicators_route(indicator_id: str):
+    """List the child indicator IDs for this indicator."""
+    try:
+        PyObjectId(indicator_id)
+    except (InvalidId, ValueError):
+        raise HTTPException(status_code=400, detail=INVALID_INDICATOR_ID)
+    return await get_child_indicators(indicator_id)
 
 
 @router.post("/{indicator_id}/export/image", response_class=Response)

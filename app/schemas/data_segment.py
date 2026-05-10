@@ -44,7 +44,15 @@ class IndicatorSeries(BaseModel):
     """One line on the chart. Identified by (resource_id, series_label):
     a single resource can contribute several series when the source file has
     multiple value columns. series_label is None for legacy single-stream
-    resources (one wrapper → one untagged series)."""
+    resources (one wrapper → one untagged series).
+
+    `source_indicator_*` fields identify which indicator owns the underlying
+    data. They equal the requested indicator for own resources; for composed
+    indicators they identify the child whose resource produced this series.
+    The frontend uses them to label lines when several indicators contribute."""
     resource_id: str
     series_label: Optional[str] = None
     points: List[DataPoint]
+    source_indicator_id: Optional[str] = None
+    source_indicator_name: Optional[str] = None
+    source_indicator_name_en: Optional[str] = None
