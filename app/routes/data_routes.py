@@ -68,12 +68,17 @@ async def get_indicator_series(
     sort: str = Query("asc", regex="^(asc|desc)$"),
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    granularity: str = Query("0", description="Bucket size for downsampling (e.g. 1d, 1M, 1y, or 'auto')"),
+    aggregator: str = Query("avg", description="Aggregation method per bucket (last, first, sum, avg, median, max, min, count, p0-p100)"),
 ):
     """One timeseries per resource. Each entry feeds a separate line on the chart."""
     try:
         PyObjectId(indicator_id)
     except (InvalidId, ValueError):
         raise HTTPException(status_code=400, detail=INVALID_INDICATOR_ID)
+
+    if granularity not in ("0", "auto") and not validate_aggregator(aggregator):
+        raise HTTPException(status_code=400, detail=f"Invalid aggregator: {aggregator}")
 
     try:
         series = await get_series_data_points(
@@ -83,6 +88,8 @@ async def get_indicator_series(
             limit=limit,
             start_date=start_date,
             end_date=end_date,
+            granularity=granularity,
+            aggregator=aggregator,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
