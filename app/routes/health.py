@@ -1,8 +1,12 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from dependencies.rabbitmq import rabbitmq_client
 
 router = APIRouter()
 
 
 @router.get("/")
-def read_root():
-    return {"message": "Hello from indicator service!"}
+async def health_check():
+    mq_ok = await rabbitmq_client.health_probe()
+    if mq_ok:
+        return {"status": "ok", "rabbitmq": True}
+    raise HTTPException(status_code=503, detail={"rabbitmq": False})
