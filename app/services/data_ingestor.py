@@ -1,3 +1,4 @@
+import asyncio
 import json
 import aio_pika
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
@@ -149,11 +150,21 @@ async def process_message(message: aio_pika.abc.AbstractIncomingMessage):
             return
 
         try:
-            # Find indicator by resource
+            # Find indicator by resource. When the user adds multiple sources
+            # at once, wrappers can publish data before the frontend finishes
+            # linking every resource to the indicator. Without a retry the
+            # racing messages are silently dropped and the indicator chart
+            # ends up empty. Poll briefly so the late-linked sources still
+            # land instead of being lost.
             indicator = await get_indicator_by_resource(resource_id)
+            attempts = 0
+            while not indicator and attempts < 6:
+                await asyncio.sleep(5)
+                indicator = await get_indicator_by_resource(resource_id)
+                attempts += 1
             if not indicator:
                 logger.warning(
-                        f"No indicator found for resource {resource_id} - discarding message")
+                        f"No indicator found for resource {resource_id} after {attempts} retries - discarding message")
                 await message.ack()  # Acknowledge and discard
                 return
 

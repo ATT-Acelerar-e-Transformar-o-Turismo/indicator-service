@@ -174,8 +174,15 @@ async def search_indicators(
     subdomain_filter: str = None,
     include_hidden: bool = False,
 ) -> List[dict]:
-    """Search indicators by name, description, or subdomain with word-based matching and relevance scoring"""
-    if not query or len(query.strip()) < 2:
+    """Search indicators by name (accent-folded, AND across words), with relevance scoring that also rewards description/subdomain matches.
+
+    Filter is name-only — matching descriptions polluted results with
+    unrelated indicators (a common word in a description would surface a
+    name that didn't contain the user's query at all). Description and
+    subdomain still feed `calculate_relevance_score`, so they boost the
+    ranking of name-matched indicators without expanding the candidate set.
+    """
+    if not query or len(query.strip()) < 1:
         return []
 
     # Split query into individual words
@@ -184,21 +191,11 @@ async def search_indicators(
         return []
 
     try:
-        # Build search criteria for each word
-        word_patterns = []
-        for word in words:
-            word_pattern = {"$regex": word, "$options": "i"}
-            word_patterns.append(
-                {
-                    "$or": [
-                        {"name": word_pattern},
-                        {"description": word_pattern},
-                        {"subdomain": word_pattern},
-                    ]
-                }
-            )
-
-        # Find indicators that match any of the words
+        # Mongo-side filter: only structural constraints (deleted, hidden,
+        # governance, domain, subdomain). Word matching happens in Python
+        # below so we can fold accents — "saude" should match "Saúde" and
+        # vice versa. Indicator counts here are small enough (< few thousand)
+        # that fetching the candidate set and filtering in-process is fine.
         base_filters = [{"deleted": False}]
         if not include_hidden:
             base_filters.append({"hidden": {"$ne": True}})
@@ -208,29 +205,34 @@ async def search_indicators(
             hidden_dims = await get_hidden_dimension_keys()
             if hidden_dims:
                 base_filters.append({"$nor": hidden_dims})
-        search_criteria = {"$and": base_filters + [{"$or": word_patterns}]}
+        search_criteria = {"$and": list(base_filters)}
 
-        # Add governance filter if specified
         if governance_filter is not None:
             search_criteria["$and"].append({"governance": governance_filter})
 
-        # Add domain filter if specified
         if domain_filter is not None:
             search_criteria["$and"].append({"domain": ObjectId(domain_filter)})
 
-        # Add subdomain filter if specified
         if subdomain_filter is not None:
             search_criteria["$and"].append({"subdomain": subdomain_filter})
 
-        # Get more results than needed for sorting by relevance
         indicators = await db.indicators.find(search_criteria).to_list(None)
 
-        # Calculate relevance score for each indicator
+        # AND across words on the indicator name only. Both sides accent-
+        # folded so "acao" matches "Ação", "saúde" matches "Saude", etc.
+        normalized_words = [_pt_sort_key(w) for w in words]
         scored_indicators = []
         for indicator in indicators:
+            name_norm = _pt_sort_key(indicator.get("name") or "")
+            if not all(w in name_norm for w in normalized_words):
+                continue
             score = calculate_relevance_score(indicator, words)
-            if score > 0:
-                scored_indicators.append((indicator, score))
+            if score <= 0:
+                # All words appear as substrings — guarantee a positive score
+                # so accent-only matches (which the scorer might miss) still
+                # rank.
+                score = 1.0
+            scored_indicators.append((indicator, score))
 
         # Sort by relevance score or specified field
         if sort_by == "relevance" or sort_by not in [

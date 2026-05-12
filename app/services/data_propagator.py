@@ -567,21 +567,150 @@ def _to_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
 _COMPOSED_DEPTH_CAP = 8  # belt-and-braces; cycles are also rejected at write time
 
 
+_SECS_BY_UNIT = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+# 1970-01-04 was a Sunday — Mongo's $dateTrunc default startOfWeek is Sunday,
+# so we anchor weekly buckets there to keep /series and /data labels aligned.
+_WEEK_EPOCH = datetime(1970, 1, 4)
+
+
+def _bucket_start(dt: datetime, amount: int, unit: str) -> datetime:
+    """Bucket-start datetime for `dt` given (amount, unit).
+
+    Sub-week units use epoch-second truncation. Weeks anchor to Sunday to
+    match Mongo's $dateTrunc default. Month/year units use calendar
+    truncation across an absolute month index so multi-year bins (e.g. 24M)
+    span years instead of collapsing within one.
+    """
+    if unit in _SECS_BY_UNIT:
+        bucket_secs = amount * _SECS_BY_UNIT[unit]
+        # Compute epoch seconds for a naive UTC datetime without tz conversion.
+        epoch = int((dt - datetime(1970, 1, 1)).total_seconds())
+        truncated = (epoch // bucket_secs) * bucket_secs
+        return datetime(1970, 1, 1) + timedelta(seconds=truncated)
+    if unit == "w":
+        bucket_secs = amount * 604800
+        epoch = int((dt - _WEEK_EPOCH).total_seconds())
+        truncated = (epoch // bucket_secs) * bucket_secs
+        return _WEEK_EPOCH + timedelta(seconds=truncated)
+    if unit == "M":
+        absolute_idx = dt.year * 12 + (dt.month - 1)
+        bucket_absolute = (absolute_idx // amount) * amount
+        return datetime(bucket_absolute // 12, (bucket_absolute % 12) + 1, 1)
+    if unit == "y":
+        y = (dt.year // amount) * amount if amount > 1 else dt.year
+        return datetime(y, 1, 1)
+    raise ValueError(f"Unsupported unit: {unit}")
+
+
+def _aggregate_bucket(ys: List[float], aggregator: str) -> float:
+    agg_type, percentile = parse_aggregator(aggregator)
+    if not ys:
+        return 0.0
+    if agg_type == "avg":
+        return sum(ys) / len(ys)
+    if agg_type == "sum":
+        return sum(ys)
+    if agg_type == "max":
+        return max(ys)
+    if agg_type == "min":
+        return min(ys)
+    if agg_type == "first":
+        return ys[0]
+    if agg_type == "last":
+        return ys[-1]
+    if agg_type == "count":
+        return float(len(ys))
+    if agg_type == "median":
+        s = sorted(ys)
+        n = len(s)
+        return (s[n // 2] + s[(n - 1) // 2]) / 2
+    if agg_type == "percentile":
+        s = sorted(ys)
+        n = len(s)
+        idx = max(0, min(n - 1, int((percentile or 0) / 100.0 * (n - 1))))
+        return s[idx]
+    raise ValueError(f"Unknown aggregator: {aggregator}")
+
+
+def _bucket_points(
+    points: List[DataPoint],
+    amount: int,
+    unit: str,
+    aggregator: str,
+) -> List[DataPoint]:
+    """Downsample a per-series point list into time buckets. Non-datetime
+    (legacy numeric) points pass through unmodified — bucketing only makes
+    sense on a time axis."""
+    buckets: Dict[datetime, List[float]] = {}
+    numeric: List[DataPoint] = []
+    series_label = points[0].series if points else None
+    for p in points:
+        if isinstance(p.x, datetime):
+            x = _to_naive_utc(p.x)
+            start = _bucket_start(x, amount, unit)
+            buckets.setdefault(start, []).append(p.y)
+        else:
+            numeric.append(p)
+    aggregated = [
+        DataPoint(x=k, y=_aggregate_bucket(buckets[k], aggregator), series=series_label)
+        for k in sorted(buckets.keys())
+    ]
+    return aggregated + numeric
+
+
+def _resolve_auto_granularity_from_series(
+    raw_series: List[Dict[str, Any]],
+    target: int,
+) -> str:
+    """Pick a bucket size so the longest series in `raw_series` fits in
+    `target` points. Returns "0" (no bucketing) if the data is already small
+    enough or has no datetime span."""
+    if target <= 0 or not raw_series:
+        return "0"
+
+    min_x: Optional[datetime] = None
+    max_x: Optional[datetime] = None
+    max_n = 0
+    for s in raw_series:
+        pts = s.get("points") or []
+        n = sum(1 for p in pts if isinstance(p.x, datetime))
+        if n > max_n:
+            max_n = n
+        for p in pts:
+            if not isinstance(p.x, datetime):
+                continue
+            x = _to_naive_utc(p.x)
+            if min_x is None or x < min_x:
+                min_x = x
+            if max_x is None or x > max_x:
+                max_x = x
+
+    if max_n <= target or min_x is None or max_x is None:
+        return "0"
+
+    span_seconds = max(1.0, (max_x - min_x).total_seconds())
+    bucket_seconds = span_seconds / target
+    chosen = _AUTO_BUCKETS[-1]
+    for amount, unit, secs in _AUTO_BUCKETS:
+        if secs >= bucket_seconds:
+            chosen = (amount, unit, secs)
+            break
+    return f"{chosen[0]}{chosen[1]}"
+
+
 async def _own_series_for_indicator(
     indicator_id: str,
     sd: Optional[datetime],
     ed: Optional[datetime],
-    sort: str,
-    skip: int,
-    limit: int,
     source_indicator_id: str,
     source_indicator_name: str,
     source_indicator_name_en: str,
 ) -> List[Dict[str, Any]]:
-    """Build the (resource_id, series_label) → points list for ONE indicator's
-    own data segments. Pulled out of `get_series_data_points` so composed
-    indicators can call it once per ancestor in the tree without re-doing the
-    surrounding orchestration.
+    """Build the (resource_id, series_label) → raw-points list for ONE
+    indicator's own data segments. Date-filtered but otherwise untouched —
+    bucketing, sort, skip/limit, and serialisation happen at the top level
+    in `get_series_data_points` so auto granularity can see the full span
+    across the whole composed tree.
     """
     all_segments = await db.data_segments.find(
         {"indicator_id": ObjectId(indicator_id)},
@@ -591,11 +720,6 @@ async def _own_series_for_indicator(
     for seg in all_segments:
         rid = seg.get("resource_id")
         segments_by_resource.setdefault(rid, []).append(seg)
-
-    def _point_sort_key(p):
-        if isinstance(p.x, datetime):
-            return (0, _to_naive_utc(p.x), 0.0)
-        return (1, datetime.min, float(p.x))
 
     series_list: List[Dict[str, Any]] = []
     for rid, segments in segments_by_resource.items():
@@ -614,18 +738,10 @@ async def _own_series_for_indicator(
             by_series.setdefault(p.series, []).append(p)
 
         for series_label, group in by_series.items():
-            group.sort(key=_point_sort_key, reverse=(sort == "desc"))
-            paged = group[skip:skip + limit]
             series_list.append({
                 "resource_id": str(rid),
                 "series_label": series_label,
-                "points": [
-                    {
-                        "x": p.x.isoformat() if isinstance(p.x, datetime) else float(p.x),
-                        "y": p.y,
-                    }
-                    for p in paged
-                ],
+                "points": group,  # raw DataPoint objects, finalised at top level
                 "source_indicator_id": source_indicator_id,
                 "source_indicator_name": source_indicator_name,
                 "source_indicator_name_en": source_indicator_name_en,
@@ -641,6 +757,8 @@ async def get_series_data_points(
         limit: int = 1000,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
+        granularity: str = "0",
+        aggregator: str = "avg",
 ) -> List[Dict[str, Any]]:
     """One chart line per (source_indicator_id, resource_id, series_label).
 
@@ -657,7 +775,10 @@ async def get_series_data_points(
     if sd and ed and sd > ed:
         raise ValueError("start_date must be before end_date")
 
-    series_list: List[Dict[str, Any]] = []
+    if not re.match(r"^(last|first|sum|avg|median|max|min|count|p([0-9]|[1-9][0-9]|100))$", aggregator):
+        raise ValueError(f"Invalid aggregator: {aggregator}")
+
+    raw_series: List[Dict[str, Any]] = []
     visited: set = set()
 
     async def _walk(current_id: str, depth: int) -> None:
@@ -678,17 +799,56 @@ async def get_series_data_points(
 
         own = await _own_series_for_indicator(
             current_id,
-            sd, ed, sort, skip, limit,
+            sd, ed,
             source_indicator_id=current_id,
             source_indicator_name=indicator_doc.get("name") or "",
             source_indicator_name_en=indicator_doc.get("name_en") or "",
         )
-        series_list.extend(own)
+        raw_series.extend(own)
 
         for child_id in indicator_doc.get("child_indicators", []) or []:
             await _walk(str(child_id), depth + 1)
 
     await _walk(str(indicator_id), 0)
+
+    # Resolve auto granularity from the in-memory raw data so the picked
+    # bucket spans the whole composed tree, not just one branch. Then bucket
+    # each series independently; numeric (non-datetime) points pass through.
+    resolved_granularity = granularity
+    if granularity == "auto":
+        resolved_granularity = _resolve_auto_granularity_from_series(raw_series, limit)
+
+    if resolved_granularity not in ("0", "", None):
+        amount, unit = parse_granularity(resolved_granularity)
+        if amount > 0:
+            for s in raw_series:
+                s["points"] = _bucket_points(s["points"], amount, unit, aggregator)
+
+    def _point_sort_key(p):
+        if isinstance(p.x, datetime):
+            return (0, _to_naive_utc(p.x), 0.0)
+        return (1, datetime.min, float(p.x))
+
+    series_list: List[Dict[str, Any]] = []
+    for s in raw_series:
+        pts: List[DataPoint] = s["points"]
+        pts.sort(key=_point_sort_key, reverse=(sort == "desc"))
+        paged = pts[skip:skip + limit]
+        series_list.append({
+            "resource_id": s["resource_id"],
+            "series_label": s["series_label"],
+            "points": [
+                {
+                    "x": p.x.isoformat() if isinstance(p.x, datetime) else float(p.x),
+                    "y": p.y,
+                }
+                for p in paged
+            ],
+            "source_indicator_id": s["source_indicator_id"],
+            "source_indicator_name": s["source_indicator_name"],
+            "source_indicator_name_en": s["source_indicator_name_en"],
+        })
+
     return series_list
 
 
