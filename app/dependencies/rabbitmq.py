@@ -18,7 +18,15 @@ class RabbitMQClient:
         self.consumer_tasks: List[asyncio.Task] = []
 
     async def connect(self):
-        self.connection = await aio_pika.connect_robust(self.url)
+        # heartbeat=30 / reconnect_interval=5 make aio_pika notice silent
+        # transport failures within ~60s instead of the default permissive
+        # window — without these, the broker can drop us with no frames and
+        # the consumer loop hangs on a dead iterator for minutes.
+        self.connection = await aio_pika.connect_robust(
+            self.url,
+            heartbeat=30,
+            reconnect_interval=5,
+        )
         self.channel_pool = asyncio.Queue()
 
         for _ in range(self.pool_size):
@@ -26,6 +34,26 @@ class RabbitMQClient:
             await channel.set_qos(prefetch_count=10)
             await self.channel_pool.put(channel)
         logger.info("Connected and initialized channel pool")
+
+    async def health_probe(self, timeout: float = 5.0) -> bool:
+        """Active liveness check — open and close a fresh channel under a deadline.
+
+        Pool channels can go stale across a robust reconnect, so we deliberately
+        bypass the pool. A timeout here means the underlying transport is wedged
+        even if `connection.is_closed` still reads False.
+        """
+        if not self.connection or self.connection.is_closed:
+            return False
+        try:
+            channel = await asyncio.wait_for(self.connection.channel(), timeout=timeout)
+        except (asyncio.TimeoutError, AMQPConnectionError, AMQPChannelError, RuntimeError) as e:
+            logger.warning(f"Health probe: open channel failed: {e}")
+            return False
+        try:
+            await asyncio.wait_for(channel.close(), timeout=timeout)
+        except (asyncio.TimeoutError, AMQPConnectionError, AMQPChannelError, RuntimeError):
+            pass
+        return True
 
     async def close(self):
         for task in self.consumer_tasks:
