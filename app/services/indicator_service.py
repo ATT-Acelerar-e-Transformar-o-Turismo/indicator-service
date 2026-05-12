@@ -174,7 +174,14 @@ async def search_indicators(
     subdomain_filter: str = None,
     include_hidden: bool = False,
 ) -> List[dict]:
-    """Search indicators by name, description, or subdomain with word-based matching and relevance scoring"""
+    """Search indicators by name (accent-folded, AND across words), with relevance scoring that also rewards description/subdomain matches.
+
+    Filter is name-only — matching descriptions polluted results with
+    unrelated indicators (a common word in a description would surface a
+    name that didn't contain the user's query at all). Description and
+    subdomain still feed `calculate_relevance_score`, so they boost the
+    ranking of name-matched indicators without expanding the candidate set.
+    """
     if not query or len(query.strip()) < 1:
         return []
 

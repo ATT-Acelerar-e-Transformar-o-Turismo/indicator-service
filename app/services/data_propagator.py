@@ -567,15 +567,19 @@ def _to_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
 _COMPOSED_DEPTH_CAP = 8  # belt-and-braces; cycles are also rejected at write time
 
 
-_SECS_BY_UNIT = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
+_SECS_BY_UNIT = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+# 1970-01-04 was a Sunday — Mongo's $dateTrunc default startOfWeek is Sunday,
+# so we anchor weekly buckets there to keep /series and /data labels aligned.
+_WEEK_EPOCH = datetime(1970, 1, 4)
 
 
 def _bucket_start(dt: datetime, amount: int, unit: str) -> datetime:
     """Bucket-start datetime for `dt` given (amount, unit).
 
-    Sub-month units use epoch-second truncation so any datetime maps to a
-    deterministic bucket. Month/year units use calendar truncation so labels
-    land on natural boundaries (Jan 1, month 1).
+    Sub-week units use epoch-second truncation. Weeks anchor to Sunday to
+    match Mongo's $dateTrunc default. Month/year units use calendar
+    truncation across an absolute month index so multi-year bins (e.g. 24M)
+    span years instead of collapsing within one.
     """
     if unit in _SECS_BY_UNIT:
         bucket_secs = amount * _SECS_BY_UNIT[unit]
@@ -583,10 +587,15 @@ def _bucket_start(dt: datetime, amount: int, unit: str) -> datetime:
         epoch = int((dt - datetime(1970, 1, 1)).total_seconds())
         truncated = (epoch // bucket_secs) * bucket_secs
         return datetime(1970, 1, 1) + timedelta(seconds=truncated)
+    if unit == "w":
+        bucket_secs = amount * 604800
+        epoch = int((dt - _WEEK_EPOCH).total_seconds())
+        truncated = (epoch // bucket_secs) * bucket_secs
+        return _WEEK_EPOCH + timedelta(seconds=truncated)
     if unit == "M":
-        idx = (dt.month - 1)
-        bucket_idx = (idx // amount) * amount
-        return datetime(dt.year, bucket_idx + 1, 1)
+        absolute_idx = dt.year * 12 + (dt.month - 1)
+        bucket_absolute = (absolute_idx // amount) * amount
+        return datetime(bucket_absolute // 12, (bucket_absolute % 12) + 1, 1)
     if unit == "y":
         y = (dt.year // amount) * amount if amount > 1 else dt.year
         return datetime(y, 1, 1)

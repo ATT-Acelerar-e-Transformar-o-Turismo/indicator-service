@@ -77,8 +77,8 @@ async def get_indicator_series(
     except (InvalidId, ValueError):
         raise HTTPException(status_code=400, detail=INVALID_INDICATOR_ID)
 
-    if granularity not in ("0", "auto") and not validate_aggregator(aggregator):
-        raise HTTPException(status_code=400, detail=f"Invalid aggregator: {aggregator}")
+    if not validate_aggregator(aggregator):
+        raise HTTPException(status_code=400, detail=f"Invalid aggregator: {aggregator}. Valid options: {list(BASIC_AGGREGATORS)} or percentiles (p0-p100)")
 
     try:
         series = await get_series_data_points(
