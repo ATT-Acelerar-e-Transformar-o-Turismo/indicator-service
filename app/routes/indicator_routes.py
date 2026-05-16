@@ -19,6 +19,8 @@ from services.indicator_service import (
     add_child_indicator,
     remove_child_indicator,
     get_child_indicators,
+    add_composition,
+    remove_composition,
 )
 from pydantic import BaseModel
 from schemas.indicator import (
@@ -28,6 +30,7 @@ from schemas.indicator import (
     Indicator,
     IndicatorDelete,
     SimpleIndicator,
+    CompositionCreate,
 )
 from schemas.resource import ResourceCreate
 from schemas.chart_export import ChartExportRequest
@@ -68,7 +71,7 @@ async def create_indicator_route(
 @router.get("/", response_model=List[SimpleIndicator])
 async def get_indicators_route(
     skip: int = Query(0, ge=0),
-    limit: int = Query(10, ge=1, le=50),
+    limit: int = Query(10, ge=1, le=500),
     sort_by: str = Query(
         "name", description="Field to sort by: name, periodicity, favourites"
     ),
@@ -92,7 +95,7 @@ async def get_indicators_route(
 @router.get("/search", response_model=List[Indicator])
 async def search_indicators_route(
     q: str = Query(..., description="Search query"),
-    limit: int = Query(10, ge=1, le=20),
+    limit: int = Query(10, ge=1, le=500),
     skip: int = Query(0, ge=0),
     sort_by: str = Query(
         "name", description="Field to sort by: name, periodicity, favourites"
@@ -423,6 +426,46 @@ async def get_child_indicators_route(indicator_id: str):
     except (InvalidId, ValueError):
         raise HTTPException(status_code=400, detail=INVALID_INDICATOR_ID)
     return await get_child_indicators(indicator_id)
+
+
+@router.post("/{indicator_id}/compositions", response_model=Indicator)
+async def add_composition_route(
+    indicator_id: str,
+    body: CompositionCreate,
+    _=Depends(require_admin),
+):
+    """Add a derived series defined by a free-form formula over one or more
+    other indicators (e.g. `a / b`). Formula syntax and input existence are
+    validated by `CompositionCreate` and the service layer respectively.
+    """
+    try:
+        PyObjectId(indicator_id)
+    except (InvalidId, ValueError):
+        raise HTTPException(status_code=400, detail=INVALID_INDICATOR_ID)
+    try:
+        updated = await add_composition(indicator_id, body)
+        if not updated:
+            raise HTTPException(status_code=404, detail=NOT_FOUND_MESSAGE)
+        return updated
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/{indicator_id}/compositions/{composition_id}", response_model=Indicator)
+async def remove_composition_route(
+    indicator_id: str,
+    composition_id: str,
+    _=Depends(require_admin),
+):
+    """Remove a previously-added composition."""
+    try:
+        PyObjectId(indicator_id)
+    except (InvalidId, ValueError):
+        raise HTTPException(status_code=400, detail=INVALID_INDICATOR_ID)
+    updated = await remove_composition(indicator_id, composition_id)
+    if not updated:
+        raise HTTPException(status_code=404, detail=NOT_FOUND_MESSAGE)
+    return updated
 
 
 @router.post("/{indicator_id}/export/image", response_class=Response)
