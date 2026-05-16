@@ -62,7 +62,10 @@ def _validate(node: ast.AST, allowed_names: Set[str]) -> None:
             raise FormulaError("Only numeric constants are allowed")
         return
     if isinstance(node, ast.Name):
-        if node.id not in allowed_names and node.id not in _FUNCS:
+        # Function names are only valid in the `ast.Call.func` position — that
+        # branch handles them directly without recursing here. A bare reference
+        # like `min + a` would otherwise pass validation and crash at eval.
+        if node.id not in allowed_names:
             raise FormulaError(f"Unknown identifier: {node.id}")
         return
     if isinstance(node, ast.BinOp):

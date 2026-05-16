@@ -854,7 +854,11 @@ async def _evaluate_composition(
                 {"_id": ObjectId(str(ind_id))},
                 {"name": 1, "name_en": 1},
             )
-        except (InvalidId, Exception):
+        except (InvalidId, ConnectionFailure, ServerSelectionTimeoutError) as e:
+            logger.warning(
+                f"Could not load input indicator {ind_id} for composition "
+                f"{composition.get('id')}: {e}"
+            )
             doc = None
         if doc:
             input_names[key] = doc.get("name") or key
@@ -898,8 +902,9 @@ async def _evaluate_composition(
         return out
 
     composition_name = composition.get("name")
+    composition_name_en = composition.get("name_en") or composition_name
     series_label = composition_name or (_expand_formula(input_names) if input_names else formula)
-    series_label_en = composition_name or (_expand_formula(input_names_en) if input_names_en else formula)
+    series_label_en = composition_name_en or (_expand_formula(input_names_en) if input_names_en else formula)
     for b in sorted(all_buckets):
         env = {}
         ok = True
