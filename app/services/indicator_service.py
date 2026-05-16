@@ -1,10 +1,13 @@
 from typing import List, Optional
+import logging
+import secrets
+import unicodedata
 from bson.objectid import ObjectId
 from bson.errors import InvalidId
 from pymongo.collation import Collation
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 from dependencies.database import db
-from schemas.indicator import IndicatorCreate, IndicatorDelete
+from schemas.indicator import IndicatorCreate, IndicatorDelete, CompositionCreate
 from services.domain_service import (
     get_hidden_domain_ids,
     get_hidden_dimension_keys,
@@ -12,8 +15,6 @@ from services.domain_service import (
     is_subdomain_hidden,
 )
 from utils.mongo_utils import serialize, deserialize
-import logging
-import unicodedata
 
 
 def _pt_sort_key(s: str) -> str:
@@ -39,6 +40,9 @@ async def create_indicator(
     # checks. Newly created indicators always start with no children — strip
     # whatever the caller sent here so they can't sneak in a pre-built tree.
     indicator_dict.pop("child_indicators", None)
+    # Same reasoning for compositions — created via /compositions endpoints,
+    # which validate the formula and input indicator existence.
+    indicator_dict.pop("compositions", None)
     indicator_dict["_id"] = ObjectId()
     domain = await db.domains.find_one({"_id": ObjectId(domain_id)})
     if not domain:
@@ -362,6 +366,9 @@ async def update_indicator(indicator_id: str, update_data: dict) -> int:
     # update path doesn't run. Strip the field defensively so neither route
     # can be used to bypass those guards (incl. constructing a cycle).
     update_data = {k: v for k, v in update_data.items() if k != "child_indicators"}
+    # Same guard for compositions: managed via /compositions endpoints which
+    # validate the formula and that each input indicator exists.
+    update_data = {k: v for k, v in update_data.items() if k != "compositions"}
     if "domain" in update_data:
         domain_id = update_data["domain"]
         domain = await db.domains.find_one({"_id": ObjectId(domain_id)})
@@ -658,3 +665,54 @@ async def get_indicator_by_resource(resource_id: str) -> Optional[dict]:
     except (ConnectionFailure, ServerSelectionTimeoutError) as e:
         logger.error(f"Error finding indicator for resource {resource_id}: {e}")
         return None
+
+
+async def add_composition(parent_id: str, payload: CompositionCreate) -> Optional[dict]:
+    """Append a composition definition to `parent_id`. Validates that every
+    input indicator exists (and isn't deleted) and that no input refers to
+    the parent itself (self-composition would close a cycle at render time).
+    """
+    parent = await db.indicators.find_one(
+        {"_id": ObjectId(parent_id), "deleted": False}
+    )
+    if not parent:
+        raise ValueError("Indicator not found")
+
+    for inp in payload.inputs:
+        if str(inp.indicator_id) == str(parent_id):
+            raise ValueError("A composition input cannot be the indicator itself")
+        try:
+            input_oid = ObjectId(str(inp.indicator_id))
+        except (InvalidId, TypeError, ValueError):
+            raise ValueError(f"Invalid indicator id for input `{inp.key}`")
+        exists = await db.indicators.find_one(
+            {"_id": input_oid, "deleted": False}, projection={"_id": 1}
+        )
+        if not exists:
+            raise ValueError(f"Input indicator for `{inp.key}` not found")
+
+    comp_id = secrets.token_hex(8)
+    comp_doc = payload.dict()
+    # Pydantic serialises PyObjectId as ObjectId; we want plain strings on
+    # disk so the document round-trips through JSON without special handling.
+    comp_doc["inputs"] = [
+        {"key": i.key, "indicator_id": str(i.indicator_id)} for i in payload.inputs
+    ]
+    comp_doc["id"] = comp_id
+
+    await db.indicators.update_one(
+        {"_id": ObjectId(parent_id), "deleted": False},
+        {"$push": {"compositions": comp_doc}},
+    )
+    return await get_indicator_by_id(parent_id)
+
+
+async def remove_composition(parent_id: str, composition_id: str) -> Optional[dict]:
+    """Remove a composition by its id from `parent_id`."""
+    result = await db.indicators.update_one(
+        {"_id": ObjectId(parent_id), "deleted": False},
+        {"$pull": {"compositions": {"id": composition_id}}},
+    )
+    if result.matched_count == 0:
+        return None
+    return await get_indicator_by_id(parent_id)

@@ -13,6 +13,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError, TimeoutErr
 import logging
 from fastapi import BackgroundTasks
 from config import settings
+from utils.formula import compile_formula, eval_formula, FormulaError
 
 logger = logging.getLogger(__name__)
 
@@ -750,6 +751,191 @@ async def _own_series_for_indicator(
     return series_list
 
 
+async def _collapsed_bucket_map(
+    indicator_id: str,
+    sd: Optional[datetime],
+    ed: Optional[datetime],
+    bucket: str,
+    aggregator: str,
+) -> Dict[datetime, float]:
+    """Return {bucket_start → aggregated_y} for a single indicator.
+
+    Walks the indicator's own data segments AND its child indicators (same
+    rules as `get_series_data_points`), buckets all datetime points into
+    `bucket`-wide bins, then aggregates each bin with `aggregator`. Series
+    labels are ignored: a composition treats each input as one scalar per
+    bucket, regardless of how many lines the source chart has.
+    """
+    try:
+        amount, unit = parse_granularity(bucket)
+    except ValueError:
+        return {}
+    if amount <= 0:
+        return {}
+
+    visited: set = set()
+    by_bucket: Dict[datetime, List[float]] = {}
+
+    async def _walk(current_id: str, depth: int) -> None:
+        if depth > _COMPOSED_DEPTH_CAP or current_id in visited:
+            return
+        visited.add(current_id)
+        try:
+            current_oid = ObjectId(current_id)
+        except (InvalidId, TypeError, ValueError):
+            return
+        indicator_doc = await db.indicators.find_one(
+            {"_id": current_oid, "deleted": False}
+        )
+        if not indicator_doc:
+            return
+
+        all_segments = await db.data_segments.find(
+            {"indicator_id": current_oid},
+        ).to_list(None)
+        segments_by_resource: Dict[Any, list] = {}
+        for seg in all_segments:
+            rid = seg.get("resource_id")
+            segments_by_resource.setdefault(rid, []).append(seg)
+        for segments in segments_by_resource.values():
+            for p in _merge_segments(segments):
+                if not isinstance(p.x, datetime):
+                    continue
+                x = _to_naive_utc(p.x)
+                if sd and x < sd:
+                    continue
+                if ed and x > ed:
+                    continue
+                start = _bucket_start(x, amount, unit)
+                try:
+                    by_bucket.setdefault(start, []).append(float(p.y))
+                except (TypeError, ValueError):
+                    continue
+
+        for child_id in indicator_doc.get("child_indicators", []) or []:
+            await _walk(str(child_id), depth + 1)
+
+    await _walk(str(indicator_id), 0)
+    return {k: _aggregate_bucket(v, aggregator) for k, v in by_bucket.items()}
+
+
+async def _evaluate_composition(
+    composition: Dict[str, Any],
+    parent_indicator_id: str,
+    parent_indicator_name: str,
+    parent_indicator_name_en: str,
+    sd: Optional[datetime],
+    ed: Optional[datetime],
+) -> Optional[Dict[str, Any]]:
+    """Compute one composition into a series entry. Skips buckets where any
+    input is missing (so `a / b` never divides by absent data and never silently
+    treats missing inputs as zero).
+
+    Returns None on invalid formula / config; the caller drops it from the
+    output.
+    """
+    inputs = composition.get("inputs") or []
+    formula = composition.get("formula") or ""
+    bucket = composition.get("bucket") or "1M"
+    aggregator = composition.get("aggregator") or "avg"
+    keys = [i.get("key") for i in inputs if i.get("key")]
+
+    # Look up each input indicator's name so the chart legend can show the
+    # underlying indicator names instead of opaque keys ("a", "b", ...).
+    input_names: Dict[str, str] = {}
+    input_names_en: Dict[str, str] = {}
+    for inp in inputs:
+        key = inp.get("key")
+        ind_id = inp.get("indicator_id")
+        if not key or not ind_id:
+            continue
+        try:
+            doc = await db.indicators.find_one(
+                {"_id": ObjectId(str(ind_id))},
+                {"name": 1, "name_en": 1},
+            )
+        except (InvalidId, ConnectionFailure, ServerSelectionTimeoutError) as e:
+            logger.warning(
+                f"Could not load input indicator {ind_id} for composition "
+                f"{composition.get('id')}: {e}"
+            )
+            doc = None
+        if doc:
+            input_names[key] = doc.get("name") or key
+            input_names_en[key] = doc.get("name_en") or doc.get("name") or key
+
+    try:
+        tree = compile_formula(formula, keys)
+    except FormulaError as e:
+        logger.warning(
+            f"Composition {composition.get('id')} on indicator {parent_indicator_id} "
+            f"has invalid formula `{formula}`: {e}"
+        )
+        return None
+
+    # Resolve each input to its {bucket → value} map.
+    per_input: Dict[str, Dict[datetime, float]] = {}
+    for inp in inputs:
+        key = inp.get("key")
+        ind_id = inp.get("indicator_id")
+        if not key or not ind_id:
+            return None
+        per_input[key] = await _collapsed_bucket_map(
+            str(ind_id), sd, ed, bucket, aggregator
+        )
+
+    # Walk every bucket that appears in *any* input; only emit a point when
+    # all inputs have a value there.
+    all_buckets: set = set()
+    for m in per_input.values():
+        all_buckets.update(m.keys())
+
+    points: List[DataPoint] = []
+    # If the user named the composition, that wins. Otherwise expand each key
+    # in the formula with the source indicator's name so the legend reads
+    # "Acesso à Saúde / Área verde" instead of "a / b".
+    def _expand_formula(names: Dict[str, str]) -> str:
+        out = formula
+        # Replace longest keys first to avoid partial collisions (e.g. "ab" before "a").
+        for k in sorted(names.keys(), key=len, reverse=True):
+            out = re.sub(rf"\b{re.escape(k)}\b", names[k], out)
+        return out
+
+    composition_name = composition.get("name")
+    composition_name_en = composition.get("name_en") or composition_name
+    series_label = composition_name or (_expand_formula(input_names) if input_names else formula)
+    series_label_en = composition_name_en or (_expand_formula(input_names_en) if input_names_en else formula)
+    for b in sorted(all_buckets):
+        env = {}
+        ok = True
+        for key, m in per_input.items():
+            if b not in m:
+                ok = False
+                break
+            env[key] = m[b]
+        if not ok:
+            continue
+        try:
+            y = eval_formula(tree, env)
+        except (FormulaError, ZeroDivisionError, ValueError, OverflowError):
+            continue
+        if not isinstance(y, (int, float)) or y != y:  # filter NaN
+            continue
+        points.append(DataPoint(x=b, y=float(y), series=series_label))
+
+    return {
+        # Synthetic resource id so the frontend can treat each composition as
+        # its own chart line.
+        "resource_id": f"composition:{composition.get('id', '')}",
+        "series_label": series_label,
+        "series_label_en": series_label_en,
+        "points": points,
+        "source_indicator_id": parent_indicator_id,
+        "source_indicator_name": parent_indicator_name,
+        "source_indicator_name_en": parent_indicator_name_en,
+    }
+
+
 async def get_series_data_points(
         indicator_id: str,
         sort: str = "asc",
@@ -806,6 +992,21 @@ async def get_series_data_points(
         )
         raw_series.extend(own)
 
+        # Compositions on this indicator each contribute one synthetic
+        # series. Evaluated against this indicator's own (and its children's)
+        # data, with the formula applied per bucket.
+        for comp in indicator_doc.get("compositions", []) or []:
+            entry = await _evaluate_composition(
+                comp,
+                parent_indicator_id=current_id,
+                parent_indicator_name=indicator_doc.get("name") or "",
+                parent_indicator_name_en=indicator_doc.get("name_en") or "",
+                sd=sd,
+                ed=ed,
+            )
+            if entry is not None:
+                raw_series.append(entry)
+
         for child_id in indicator_doc.get("child_indicators", []) or []:
             await _walk(str(child_id), depth + 1)
 
@@ -834,7 +1035,7 @@ async def get_series_data_points(
         pts: List[DataPoint] = s["points"]
         pts.sort(key=_point_sort_key, reverse=(sort == "desc"))
         paged = pts[skip:skip + limit]
-        series_list.append({
+        entry = {
             "resource_id": s["resource_id"],
             "series_label": s["series_label"],
             "points": [
@@ -847,7 +1048,10 @@ async def get_series_data_points(
             "source_indicator_id": s["source_indicator_id"],
             "source_indicator_name": s["source_indicator_name"],
             "source_indicator_name_en": s["source_indicator_name_en"],
-        })
+        }
+        if "series_label_en" in s:
+            entry["series_label_en"] = s["series_label_en"]
+        series_list.append(entry)
 
     return series_list
 

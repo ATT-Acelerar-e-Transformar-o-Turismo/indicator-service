@@ -1,8 +1,9 @@
 from pydantic import BaseModel, Field, field_validator, model_validator
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Literal
 from schemas.domain import Domain
 from schemas.common import PyObjectId
 from schemas.chart_export import ChartType
+from utils.formula import compile_formula, FormulaError
 
 
 class SeriesTranslation(BaseModel):
@@ -15,6 +16,77 @@ class SeriesTranslation(BaseModel):
 
     pt: str = ""
     en: str = ""
+
+
+CompositionBucket = Literal["1d", "1w", "1M", "3M", "1y"]
+CompositionAggregator = Literal["avg", "sum", "min", "max", "last", "first", "count", "median"]
+
+
+class CompositionInput(BaseModel):
+    """One operand of a composed-indicator formula.
+
+    `key` is the identifier used in the formula expression (e.g. "a", "b").
+    `indicator_id` is the source whose data feeds that key.
+    """
+
+    key: str = Field(..., min_length=1, max_length=8)
+    indicator_id: PyObjectId
+
+    @field_validator("key")
+    @classmethod
+    def _key_is_identifier(cls, v: str) -> str:
+        if not v.isidentifier() or v.startswith("_"):
+            raise ValueError("key must be a valid identifier (letters/digits, no leading underscore)")
+        # Disallow shadowing whitelisted functions / Python keywords
+        reserved = {"min", "max", "abs", "round", "log", "log2", "log10", "sqrt", "exp", "pow"}
+        if v in reserved:
+            raise ValueError(f"key `{v}` is reserved")
+        return v
+
+
+class CompositionCreate(BaseModel):
+    """Payload for creating a composition on an indicator."""
+
+    name: Optional[str] = None
+    name_en: Optional[str] = None
+    inputs: List[CompositionInput]
+    formula: str = Field(..., min_length=1, max_length=512)
+    bucket: CompositionBucket = "1M"
+    aggregator: CompositionAggregator = "avg"
+
+    @field_validator("inputs")
+    @classmethod
+    def _unique_keys_and_nonempty(cls, v: List[CompositionInput]) -> List[CompositionInput]:
+        if len(v) != 2:
+            raise ValueError("inputs must contain exactly two entries")
+        keys = [i.key for i in v]
+        if len(set(keys)) != len(keys):
+            raise ValueError("input keys must be unique")
+        return v
+
+    @model_validator(mode="after")
+    def _validate_formula(self) -> "CompositionCreate":
+        try:
+            compile_formula(self.formula, [i.key for i in self.inputs])
+        except FormulaError as e:
+            raise ValueError(f"Invalid formula: {e}") from e
+        return self
+
+
+class Composition(CompositionCreate):
+    """Stored composition — same fields plus a stable id.
+
+    The formula validator is not re-run when reading from the database because
+    the formula was already validated at write time and re-compiling on every
+    read is wasteful (and could fail on Pydantic model_validator mode changes).
+    """
+
+    id: str
+
+    @model_validator(mode="after")
+    def _validate_formula(self) -> "Composition":
+        # Override parent to skip formula re-validation on read.
+        return self
 
 
 DEFAULT_CHART_TYPES: List[ChartType] = [
@@ -59,6 +131,10 @@ class IndicatorBase(BaseModel):
     # protects against runtime regressions. Empty for non-composed
     # indicators.
     child_indicators: List[str] = Field(default_factory=list)
+    # Derived series defined by a free-form formula over one or more existing
+    # indicators (e.g. "a / b"). Each composition produces a single chart line
+    # alongside the indicator's own resources / child indicators.
+    compositions: List[Composition] = Field(default_factory=list)
 
     @field_validator("chart_types")
     @classmethod
