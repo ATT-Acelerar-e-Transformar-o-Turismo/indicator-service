@@ -98,13 +98,23 @@ DEFAULT_CHART_TYPES: List[ChartType] = [
 DEFAULT_CHART_TYPE: ChartType = ChartType.line
 
 
+IndicatorStatus = Literal["draft", "published"]
+
+
 class IndicatorBase(BaseModel):
     name: str
     name_en: Optional[str] = ""
-    periodicity: str
+    # Drafts can be saved with only name + area + dimension, so periodicity
+    # and favourites need defaults — the strict required-field validation
+    # used to reject "Guardar rascunho" submissions outright.
+    periodicity: Optional[str] = ""
     periodicity_en: Optional[str] = ""
-    favourites: int
-    governance: bool
+    favourites: int = 0
+    governance: bool = False
+    # Lifecycle flag. Drafts are hidden from public listings and from the
+    # admin's default view; the admin opts into seeing them via the
+    # "Rascunhos" pill (status_filter=draft on the API).
+    status: IndicatorStatus = "published"
     description: Optional[str] = None
     description_en: Optional[str] = ""
     font: Optional[str] = None
@@ -179,6 +189,8 @@ class IndicatorPatch(BaseModel):
     favourites: Optional[int] = None
     governance: Optional[bool] = None
     hidden: Optional[bool] = None
+    # Promote draft → published (or demote, though the UI doesn't do that).
+    status: Optional[IndicatorStatus] = None
     description: Optional[str] = None
     description_en: Optional[str] = None
     font: Optional[str] = None
