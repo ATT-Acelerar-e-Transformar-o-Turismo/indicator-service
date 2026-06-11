@@ -31,6 +31,32 @@ logger = logging.getLogger(__name__)
 PT_COLLATION = Collation(locale="pt", strength=1)
 
 
+def _apply_status_filter(filter_criteria: dict, status_filter: Optional[str]) -> dict:
+    """Mutate `filter_criteria` in place with the draft/published clause.
+
+    - status_filter="draft"      → only drafts
+    - status_filter="published"  → only published
+    - status_filter="all"        → both (admin "Rascunhos" toggle off-state
+                                    still wants drafts in admin lists if
+                                    explicitly asked; not used by default)
+    - None / anything else       → published-or-legacy (status missing/null
+                                    is treated as published so existing docs
+                                    keep showing up)
+
+    Legacy indicators created before the `status` field existed don't have it
+    at all; treat those as published so this rollout is non-breaking.
+    """
+    if status_filter == "draft":
+        filter_criteria["status"] = "draft"
+    elif status_filter == "all":
+        pass
+    else:
+        # Default: hide drafts. Match docs where status is either "published"
+        # or missing entirely (legacy data).
+        filter_criteria["status"] = {"$ne": "draft"}
+    return filter_criteria
+
+
 async def create_indicator(
     domain_id: str, subdomain_name: str, indicator_data: IndicatorCreate
 ) -> Optional[dict]:
@@ -71,6 +97,7 @@ async def get_all_indicators(
     sort_order: str = "asc",
     governance_filter: bool = None,
     include_hidden: bool = False,
+    status_filter: Optional[str] = None,
 ) -> List[dict]:
     # Define sort order
     sort_direction = 1 if sort_order.lower() == "asc" else -1
@@ -100,6 +127,7 @@ async def get_all_indicators(
             filter_criteria["$nor"] = hidden_dims
     if governance_filter is not None:
         filter_criteria["governance"] = governance_filter
+    _apply_status_filter(filter_criteria, status_filter)
 
     indicators = (
         await db.indicators.find(filter_criteria)
@@ -112,7 +140,9 @@ async def get_all_indicators(
     return [serialize(indicator) for indicator in indicators]
 
 
-async def get_indicators_count(include_hidden: bool = False) -> int:
+async def get_indicators_count(
+    include_hidden: bool = False, status_filter: Optional[str] = None
+) -> int:
     """Get total count of non-deleted indicators"""
     filter_criteria = {"deleted": False}
     if not include_hidden:
@@ -123,12 +153,16 @@ async def get_indicators_count(include_hidden: bool = False) -> int:
         hidden_dims = await get_hidden_dimension_keys()
         if hidden_dims:
             filter_criteria["$nor"] = hidden_dims
+    _apply_status_filter(filter_criteria, status_filter)
     count = await db.indicators.count_documents(filter_criteria)
     return count
 
 
 async def get_indicators_count_by_domain(
-    domain_id: str, governance_filter: bool = None, include_hidden: bool = False
+    domain_id: str,
+    governance_filter: bool = None,
+    include_hidden: bool = False,
+    status_filter: Optional[str] = None,
 ) -> int:
     """Get total count of indicators for a specific domain"""
     if not include_hidden and await is_domain_hidden(domain_id):
@@ -142,13 +176,18 @@ async def get_indicators_count_by_domain(
             filter_criteria["subdomain"] = {"$nin": hidden_subs_here}
     if governance_filter is not None:
         filter_criteria["governance"] = governance_filter
+    _apply_status_filter(filter_criteria, status_filter)
 
     count = await db.indicators.count_documents(filter_criteria)
     return count
 
 
 async def get_indicators_count_by_subdomain(
-    domain_id: str, subdomain_name: str, governance_filter: bool = None, include_hidden: bool = False
+    domain_id: str,
+    subdomain_name: str,
+    governance_filter: bool = None,
+    include_hidden: bool = False,
+    status_filter: Optional[str] = None,
 ) -> int:
     """Get total count of indicators for a specific subdomain"""
     if not include_hidden and await is_subdomain_hidden(domain_id, subdomain_name):
@@ -162,6 +201,7 @@ async def get_indicators_count_by_subdomain(
         filter_criteria["hidden"] = {"$ne": True}
     if governance_filter is not None:
         filter_criteria["governance"] = governance_filter
+    _apply_status_filter(filter_criteria, status_filter)
 
     count = await db.indicators.count_documents(filter_criteria)
     return count
@@ -177,6 +217,7 @@ async def search_indicators(
     domain_filter: str = None,
     subdomain_filter: str = None,
     include_hidden: bool = False,
+    status_filter: Optional[str] = None,
 ) -> List[dict]:
     """Search indicators by name (accent-folded, AND across words), with relevance scoring that also rewards description/subdomain matches.
 
@@ -219,6 +260,13 @@ async def search_indicators(
 
         if subdomain_filter is not None:
             search_criteria["$and"].append({"subdomain": subdomain_filter})
+
+        # Draft/published clause — pulled in as another AND term so it sits
+        # alongside the other filters instead of mutating the top-level dict.
+        status_clause: dict = {}
+        _apply_status_filter(status_clause, status_filter)
+        if status_clause:
+            search_criteria["$and"].append(status_clause)
 
         indicators = await db.indicators.find(search_criteria).to_list(None)
 
@@ -405,6 +453,7 @@ async def get_indicators_by_domain(
     sort_order: str = "asc",
     governance_filter: bool = None,
     include_hidden: bool = False,
+    status_filter: Optional[str] = None,
 ) -> List[dict]:
     # Define sort order
     sort_direction = 1 if sort_order.lower() == "asc" else -1
@@ -434,6 +483,7 @@ async def get_indicators_by_domain(
             filter_criteria["subdomain"] = {"$nin": hidden_subs_here}
     if governance_filter is not None:
         filter_criteria["governance"] = governance_filter
+    _apply_status_filter(filter_criteria, status_filter)
 
     indicators = (
         await db.indicators.find(filter_criteria)
@@ -455,6 +505,7 @@ async def get_indicators_by_subdomain(
     sort_order: str = "asc",
     governance_filter: bool = None,
     include_hidden: bool = False,
+    status_filter: Optional[str] = None,
 ) -> List[dict]:
     if not include_hidden and await is_subdomain_hidden(domain_id, subdomain_name):
         return []
@@ -485,6 +536,7 @@ async def get_indicators_by_subdomain(
         filter_criteria["hidden"] = {"$ne": True}
     if governance_filter is not None:
         filter_criteria["governance"] = governance_filter
+    _apply_status_filter(filter_criteria, status_filter)
 
     indicators = (
         await db.indicators.find(filter_criteria)
