@@ -124,6 +124,10 @@ class IndicatorBase(BaseModel):
     unit: Optional[str] = None
     unit_en: Optional[str] = ""
     carrying_capacity: Optional[str] = None
+    # Whether the indicator page shows the time-average buttons (raw / hourly /
+    # daily / annual). Disabled for indicators whose values are not meaningfully
+    # averaged over time (e.g. environment readings: CO, O3, noise, rainfall).
+    show_time_averages: bool = True
     chart_types: List[ChartType] = Field(default_factory=lambda: list(DEFAULT_CHART_TYPES))
     default_chart_type: ChartType = DEFAULT_CHART_TYPE
     # Series labels (column names from data wrappers) the admin has toggled
@@ -200,6 +204,7 @@ class IndicatorPatch(BaseModel):
     unit: Optional[str] = None
     unit_en: Optional[str] = None
     carrying_capacity: Optional[str] = None
+    show_time_averages: Optional[bool] = None
     chart_types: Optional[List[ChartType]] = None
     default_chart_type: Optional[ChartType] = None
     hidden_series: Optional[List[str]] = None
