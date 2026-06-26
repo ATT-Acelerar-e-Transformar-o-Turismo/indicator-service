@@ -38,6 +38,12 @@ async def process_resource_deleted(message: aio_pika.abc.AbstractIncomingMessage
         try:
             payload = json.loads(message.body.decode())
             resource_id = payload.get("resource_id")
+            # reset=True means "the resource's data is being regenerated": purge
+            # the old data_segments and caches but KEEP the resource linked to
+            # its indicators. Without this, regeneration leaves stale (often
+            # un-tagged) points behind that the (x, series) dedup keeps as a
+            # separate line — the indicator chart then still shows the old data.
+            reset = bool(payload.get("reset", False))
             if not resource_id:
                 logger.warning("Invalid resource deletion message: missing resource_id")
                 return
@@ -63,10 +69,11 @@ async def process_resource_deleted(message: aio_pika.abc.AbstractIncomingMessage
                 indicator_id_str = str(indicator_id)
 
                 try:
-                    await db.indicators.update_one(
-                        {"_id": indicator_id},
-                        {"$pull": {"resources": resource_id}},
-                    )
+                    if not reset:
+                        await db.indicators.update_one(
+                            {"_id": indicator_id},
+                            {"$pull": {"resources": resource_id}},
+                        )
 
                     if resource_object_id is not None:
                         await db.data_segments.delete_many(
@@ -98,7 +105,8 @@ async def process_resource_deleted(message: aio_pika.abc.AbstractIncomingMessage
                     await delete_keys_by_prefix(redis_client, stats_cache_prefix)
 
                     logger.info(
-                        f"Cleaned indicator {indicator_id_str} after resource deletion {resource_id}"
+                        f"Cleaned indicator {indicator_id_str} after resource "
+                        f"{'reset' if reset else 'deletion'} {resource_id}"
                     )
                 except Exception as indicator_error:
                     logger.error(
