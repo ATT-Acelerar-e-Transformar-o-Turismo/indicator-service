@@ -150,21 +150,28 @@ async def process_message(message: aio_pika.abc.AbstractIncomingMessage):
             return
 
         try:
-            # Find indicator by resource. When the user adds multiple sources
-            # at once, wrappers can publish data before the frontend finishes
-            # linking every resource to the indicator. Without a retry the
-            # racing messages are silently dropped and the indicator chart
-            # ends up empty. Poll briefly so the late-linked sources still
-            # land instead of being lost.
+            # Find indicator by resource. The resource→indicator link can lag
+            # the data by a moment (the wizard links a resource just after its
+            # wrapper starts producing), so a not-yet-linked resource gets ONE
+            # deferred retry. Crucially this must NOT block the single consumer
+            # for long: the old version slept 6×5s = 30s per message, so a few
+            # *permanently* orphaned resources (deleted/unlinked indicators
+            # whose continuous wrappers kept publishing) clogged the whole
+            # pipeline and starved legitimate data. Now: a brief grace, then
+            # requeue once for a late link, then discard — bounded and mostly
+            # non-blocking.
             indicator = await get_indicator_by_resource(resource_id)
-            attempts = 0
-            while not indicator and attempts < 6:
-                await asyncio.sleep(5)
+            if not indicator and not message.redelivered:
+                await asyncio.sleep(2)  # brief grace for the link to settle
                 indicator = await get_indicator_by_resource(resource_id)
-                attempts += 1
+                if not indicator:
+                    # Defer instead of blocking — the consumer keeps serving
+                    # other messages; this one gets one more shot when redelivered.
+                    await message.nack(requeue=True)
+                    return
             if not indicator:
                 logger.warning(
-                        f"No indicator found for resource {resource_id} after {attempts} retries - discarding message")
+                        f"No indicator found for resource {resource_id} - discarding message")
                 await message.ack()  # Acknowledge and discard
                 return
 

@@ -1,4 +1,5 @@
 from typing import List, Optional
+import json
 import logging
 import secrets
 import unicodedata
@@ -7,6 +8,8 @@ from bson.errors import InvalidId
 from pymongo.collation import Collation
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 from dependencies.database import db
+from dependencies.rabbitmq import rabbitmq_client
+from config import settings
 from schemas.indicator import IndicatorCreate, IndicatorDelete, CompositionCreate
 from services.domain_service import (
     get_hidden_domain_ids,
@@ -437,12 +440,50 @@ async def update_indicator(indicator_id: str, update_data: dict) -> int:
 
 
 async def delete_indicator(indicator_id: str) -> Optional[IndicatorDelete]:
+    indicator = await db.indicators.find_one({"_id": ObjectId(indicator_id)})
     result = await db.indicators.update_one(
         {"_id": ObjectId(indicator_id)}, {"$set": {"deleted": True}}
     )
     if result.modified_count > 0:
+        # Stop the wrappers of resources that are now orphaned — i.e. not used
+        # by any OTHER non-deleted indicator. Otherwise their continuous API
+        # wrappers keep running forever, publishing data that has no home and
+        # clogging the ingest pipeline. resource-service does the actual stop.
+        await _signal_orphaned_resource_cleanup(indicator_id, indicator)
         return IndicatorDelete(id=indicator_id, deleted=True)
     return None
+
+
+async def _signal_orphaned_resource_cleanup(indicator_id: str, indicator: Optional[dict]) -> None:
+    """Tell resource-service to stop the wrappers of resources left orphaned by
+    this indicator's deletion. Best-effort: never fail the delete over it."""
+    try:
+        resource_ids = (indicator or {}).get("resources", []) or []
+        orphaned = []
+        for rid in resource_ids:
+            still_used = await db.indicators.count_documents({
+                "resources": rid,
+                "deleted": False,
+                "_id": {"$ne": ObjectId(indicator_id)},
+            })
+            if still_used == 0:
+                orphaned.append(rid)
+        if not orphaned:
+            return
+        await rabbitmq_client.publish(
+            settings.INDICATOR_DELETED_QUEUE,
+            json.dumps({"indicator_id": indicator_id, "resource_ids": orphaned}),
+        )
+        logger.info(
+            f"Requested wrapper stop for {len(orphaned)} orphaned resource(s) "
+            f"after deleting indicator {indicator_id}"
+        )
+    except Exception as e:  # noqa: BLE001 — cleanup is best-effort
+        logger.error(
+            f"Failed to signal orphaned-resource cleanup for indicator "
+            f"{indicator_id}: {e}",
+            exc_info=True,
+        )
 
 
 async def get_indicators_by_domain(
